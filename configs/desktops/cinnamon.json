@@ -1,0 +1,5 @@
+{
+  "desktop": "cinnamon",
+  "display_manager": "lightdm",
+  "packages": ["cinnamon-desktop-environment", "lightdm"]
+}

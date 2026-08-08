@@ -1,0 +1,6 @@
+{
+  "services": {
+    "enable": ["bluetooth"],
+    "disable": []
+  }
+}

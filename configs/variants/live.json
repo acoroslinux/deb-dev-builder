@@ -1,0 +1,4 @@
+{
+  "variant": "live",
+  "packages": ["live-boot", "live-config"]
+}

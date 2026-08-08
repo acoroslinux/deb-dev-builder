@@ -1,0 +1,6 @@
+{
+  "packages": ["syslinux", "isolinux"],
+  "bootloader": {
+    "type": "syslinux"
+  }
+}

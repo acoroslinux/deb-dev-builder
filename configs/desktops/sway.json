@@ -1,0 +1,5 @@
+{
+  "desktop": "sway",
+  "display_manager": "sddm",
+  "packages": ["sway", "sddm"]
+}

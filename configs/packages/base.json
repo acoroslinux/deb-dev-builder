@@ -1,0 +1,18 @@
+{
+  "packages": [
+    "live-boot",
+    "live-config",
+    "live-config-systemd",
+    "user-setup",
+    "sudo",
+    "bash",
+    "coreutils",
+    "iproute2",
+    "iputils-ping",
+    "curl",
+    "wget",
+    "ca-certificates",
+    "firmware-linux-free",
+    "firmware-linux-nonfree"
+  ]
+}

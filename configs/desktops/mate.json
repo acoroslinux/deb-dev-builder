@@ -1,0 +1,5 @@
+{
+  "desktop": "mate",
+  "display_manager": "lightdm",
+  "packages": ["mate-desktop-environment", "lightdm"]
+}

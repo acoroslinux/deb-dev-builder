@@ -1,0 +1,3 @@
+{
+  "packages": ["ufw", "fail2ban", "gnupg", "apparmor", "apparmor-utils"]
+}

@@ -1,0 +1,5 @@
+{
+  "desktop": "i3",
+  "display_manager": "lightdm",
+  "packages": ["i3", "lightdm"]
+}

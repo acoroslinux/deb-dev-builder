@@ -1,0 +1,7 @@
+{
+  "distro": "devuan-ceres",
+  "distro_name": "Devuan GNU+Linux (Ceres Unstable)",
+  "suite": "ceres",
+  "mirror": "http://deb.devuan.org/merged",
+  "components": ["main", "contrib", "non-free-firmware"]
+}

@@ -1,0 +1,10 @@
+{
+  "packages": [
+    "pipewire",
+    "pipewire-audio",
+    "pipewire-pulse",
+    "wireplumber",
+    "pavucontrol",
+    "alsa-utils"
+  ]
+}

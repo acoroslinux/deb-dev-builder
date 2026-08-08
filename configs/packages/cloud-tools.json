@@ -1,0 +1,3 @@
+{
+  "packages": ["docker.io", "docker-compose", "podman", "kubectl", "helm", "terraform"]
+}

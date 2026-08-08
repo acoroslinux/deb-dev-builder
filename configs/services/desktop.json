@@ -1,0 +1,6 @@
+{
+  "services": {
+    "enable": ["gdm3", "lightdm", "sddm"],
+    "disable": []
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "init_system": "runit",
+  "packages": ["runit", "elogind"]
+}

@@ -1,0 +1,3 @@
+{
+  "packages": ["samba", "smbclient", "cifs-utils", "nfs-common", "avahi-daemon"]
+}

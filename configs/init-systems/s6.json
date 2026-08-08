@@ -1,0 +1,4 @@
+{
+  "init_system": "s6",
+  "packages": ["s6", "elogind"]
+}

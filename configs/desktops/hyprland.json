@@ -1,0 +1,5 @@
+{
+  "desktop": "hyprland",
+  "display_manager": "sddm",
+  "packages": ["hyprland", "sddm"]
+}

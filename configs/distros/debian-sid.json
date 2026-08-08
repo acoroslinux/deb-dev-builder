@@ -1,0 +1,7 @@
+{
+  "distro": "debian-sid",
+  "distro_name": "Debian GNU/Linux (Sid Unstable)",
+  "suite": "sid",
+  "mirror": "http://deb.debian.org/debian",
+  "components": ["main", "contrib", "non-free-firmware"]
+}

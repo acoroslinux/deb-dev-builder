@@ -1,0 +1,3 @@
+{
+  "packages": ["waybar", "rofi", "swaylock", "swayidle", "mako-notifier", "grim", "slurp", "wl-clipboard"]
+}

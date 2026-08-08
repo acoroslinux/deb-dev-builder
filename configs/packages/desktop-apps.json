@@ -1,0 +1,3 @@
+{
+  "packages": ["gparted", "file-roller", "evince", "eog", "gnome-calculator"]
+}

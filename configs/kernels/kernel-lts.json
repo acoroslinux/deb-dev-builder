@@ -1,0 +1,4 @@
+{
+  "kernel": "kernel-lts",
+  "packages": ["linux-image-generic", "linux-headers-generic"]
+}

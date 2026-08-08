@@ -1,0 +1,3 @@
+{
+  "packages": ["cups", "cups-filters", "system-config-printer"]
+}

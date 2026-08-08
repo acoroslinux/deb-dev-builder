@@ -1,0 +1,7 @@
+{
+  "distro": "devuan-6",
+  "distro_name": "Devuan GNU+Linux 6 (Excalibur)",
+  "suite": "excalibur",
+  "mirror": "http://deb.devuan.org/merged",
+  "components": ["main", "contrib", "non-free-firmware"]
+}

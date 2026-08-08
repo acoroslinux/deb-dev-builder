@@ -1,0 +1,3 @@
+{
+  "packages": ["wireshark", "nmap", "iperf3", "traceroute", "net-tools", "tcpdump", "openvpn", "wireguard-tools", "dnsutils"]
+}

@@ -1,0 +1,4 @@
+{
+  "init_system": "systemd",
+  "packages": ["systemd", "systemd-sysv"]
+}

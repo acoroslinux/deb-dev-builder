@@ -1,0 +1,6 @@
+{
+  "live_user": {
+    "name": "guest",
+    "groups": ["audio", "video"]
+  }
+}

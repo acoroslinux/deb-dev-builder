@@ -1,0 +1,4 @@
+{
+  "init_system": "sysvinit",
+  "packages": ["sysvinit-core", "elogind"]
+}

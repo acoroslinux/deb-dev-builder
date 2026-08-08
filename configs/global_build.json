@@ -1,0 +1,10 @@
+{
+  "system": {
+    "hostname": "deb-dev-live",
+    "locale": "en_US.UTF-8",
+    "iso_label": "DEB-DEV-LIVE"
+  },
+  "boot": {
+    "kernel_params": "boot=live components quiet splash"
+  }
+}

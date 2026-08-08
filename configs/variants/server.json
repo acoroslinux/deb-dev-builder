@@ -1,0 +1,4 @@
+{
+  "variant": "server",
+  "packages": ["openssh-server", "curl", "net-tools"]
+}
