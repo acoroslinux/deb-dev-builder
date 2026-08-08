@@ -38,3 +38,9 @@ class TestOrchestrator:
         orch = make_orchestrator(tmp_path=tmp_path, distro="devuan-5", init_system="openrc", desktop="xfce")
         result = orch.build()
         assert isinstance(result, Path)
+
+    def test_mock_build_tarball(self, tmp_path):
+        orch = make_orchestrator(tmp_path=tmp_path, distro="debian-12", output_format="tarball")
+        result = orch.build()
+        assert isinstance(result, Path)
+        assert result.name.endswith(".tar.xz")

@@ -57,7 +57,7 @@ class APTManager:
         with open(sources_dir / "sources.list", "w") as f:
             f.write(sources_content)
 
-    def bootstrap_rootfs(self, suite: str, arch: str):
+    def bootstrap_rootfs(self, suite: str, arch: str, use_seed: bool = True):
         if self.chroot.mode == "mock":
             try:
                 self.target_root.mkdir(parents=True, exist_ok=True)
@@ -66,6 +66,19 @@ class APTManager:
             except PermissionError:
                 logger.debug("Mock rootfs creation ignored due to permissions.")
             return
+
+        distro = self.config.get("distro", "debian-12")
+        seed_cache = self.resolve_cache_dir() / f"seed-{distro}-{arch}.tar.xz"
+
+        if use_seed and seed_cache.exists():
+            logger.info(f"⚡ Fast-bootstrapping rootfs from local seed tarball: {seed_cache}")
+            self.target_root.mkdir(parents=True, exist_ok=True)
+            res = subprocess.run(["tar", "xpf", str(seed_cache), "-C", str(self.target_root), "--numeric-owner"])
+            if res.returncode == 0:
+                logger.info("Successfully bootstrapped rootfs from local seed tarball in seconds!")
+                return
+            else:
+                logger.warning("Local seed tarball extraction failed. Falling back to network bootstrap.")
 
         mirror = self.config.get("mirror", "http://deb.debian.org/debian")
         components = ",".join(self.config.get("components", ["main", "contrib", "non-free-firmware"]))
@@ -94,6 +107,13 @@ class APTManager:
         res = subprocess.run(cmd)
         if res.returncode != 0:
             raise APTManagerError(f"Bootstrap failed with exit code: {res.returncode}")
+
+        # Save seed tarball for future instant builds
+        try:
+            logger.info(f"Caching rootfs seed tarball to {seed_cache}...")
+            subprocess.run(["tar", "cJpf", str(seed_cache), "-C", str(self.target_root), "."], check=False)
+        except Exception as e:
+            logger.warning(f"Could not save seed tarball cache: {e}")
 
     def update_apt_cache(self):
         if self.chroot.mode == "mock":

@@ -150,6 +150,8 @@ class BuildOrchestrator:
             if self.output_format == "img":
                 disk_engine = DiskEngine(self.workdir, self.target_root, name, self.config, self.mode)
                 artifact = disk_engine.build_disk_image()
+            elif self.output_format == "tarball":
+                artifact = iso_engine.build_tarball()
             else:
                 artifact = iso_engine.build_iso()
 

@@ -195,3 +195,12 @@ class ISOEngine:
             )
 
         return iso_path
+
+    def build_tarball(self) -> Path:
+        tar_path = resolve_from_project(f"output/stage3_seeds/{self.output_name}.tar.xz")
+        tar_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.mode == "mock":
+            tar_path.touch()
+        else:
+            subprocess.run(["tar", "cJpf", str(tar_path), "-C", str(self.target_root), "."], check=True)
+        return tar_path
