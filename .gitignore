@@ -2,18 +2,56 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.eggs/
+*.egg-info/
 
-# Build and output directories
+# Build, cache, and artifact directories
 workdir/
 output/
 cache/
+tmp/
+tmp_efi/
+iso_root/
+chroot/
+build_host/
 
-# Testing and coverage
+# ISOs, Disk Images, Tarballs, and Checksums
+*.iso
+*.img
+*.qcow2
+*.vmdk
+*.vdi
+*.tar
+*.tar.gz
+*.tar.xz
+*.tar.bz2
+*.sha256
+*.md5
+
+# Testing, Coverage & Quality
 .pytest_cache/
 .coverage
 htmlcov/
+.mypy_cache/
+.ruff_cache/
 
-# Environments
-.venv
-env/
+# Virtual Environments
+.venv/
 venv/
+env/
+ENV/
+
+# Logs & Temporary Files
+*.log
+*.tmp
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# IDE & Editor Settings
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
