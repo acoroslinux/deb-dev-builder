@@ -1,0 +1,9 @@
+{
+  "distro": "debian-testing",
+  "distro_name": "Debian GNU/Linux (Testing)",
+  "suite": "testing",
+  "mirror": "http://deb.debian.org/debian",
+  "security_mirror": "http://security.debian.org/debian-security",
+  "updates_mirror": "http://deb.debian.org/debian",
+  "components": ["main", "contrib", "non-free-firmware"]
+}
