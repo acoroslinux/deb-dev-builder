@@ -158,6 +158,10 @@ class BuildOrchestrator:
             if self.generate_manifest and artifact and artifact.exists():
                 self._generate_checksums(artifact)
 
+            from deb_dev_builder.core.path_utils import resolve_from_project
+            output_dir = resolve_from_project("output")
+            self._fix_output_permissions(output_dir)
+
             return artifact
         finally:
             try:
@@ -168,6 +172,36 @@ class BuildOrchestrator:
                 toolchain.umount_virtual_fs()
             except Exception:
                 pass
+
+            from deb_dev_builder.core.path_utils import resolve_from_project
+            output_dir = resolve_from_project("output")
+            self._fix_output_permissions(output_dir)
+
+    def _fix_output_permissions(self, output_dir: Path):
+        """Fix ownership of output directory and built ISOs from root to SUDO_USER if invoked via sudo."""
+        if not output_dir.exists():
+            return
+        sudo_uid = os.environ.get("SUDO_UID")
+        sudo_gid = os.environ.get("SUDO_GID")
+        if sudo_uid and sudo_gid:
+            try:
+                uid = int(sudo_uid)
+                gid = int(sudo_gid)
+                for root, dirs, files in os.walk(output_dir):
+                    for d in dirs:
+                        try:
+                            os.chown(os.path.join(root, d), uid, gid)
+                        except Exception:
+                            pass
+                    for f in files:
+                        try:
+                            os.chown(os.path.join(root, f), uid, gid)
+                        except Exception:
+                            pass
+                os.chown(output_dir, uid, gid)
+                logger.info(f"Updated ownership of {output_dir} to non-root user ({sudo_uid}:{sudo_gid})")
+            except Exception as e:
+                logger.warning(f"Could not update output ownership: {e}")
 
     def _generate_checksums(self, artifact_path: Path):
         if not artifact_path or not artifact_path.exists():
