@@ -94,7 +94,12 @@ class ISOEngine:
             return
 
         formats_to_build = []
-        if self.arch in ["i686", "i386", "x86", "x86_64", "amd64"]:
+        if self.arch in ["i686", "i386", "x86"]:
+            formats_to_build = [
+                ("i386-efi",   "BOOTIA32.EFI"),
+                ("x86_64-efi", "BOOTX64.EFI"),
+            ]
+        elif self.arch in ["x86_64", "amd64"]:
             formats_to_build = [
                 ("x86_64-efi", "BOOTX64.EFI"),
                 ("i386-efi",   "BOOTIA32.EFI"),
