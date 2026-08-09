@@ -108,10 +108,14 @@ class APTManager:
         if res.returncode != 0:
             raise APTManagerError(f"Bootstrap failed with exit code: {res.returncode}")
 
-        # Save seed tarball for future instant builds
+        # Save seed tarball for future instant builds (excluding virtual kernel filesystems)
         try:
             logger.info(f"Caching rootfs seed tarball to {seed_cache}...")
-            subprocess.run(["tar", "cJpf", str(seed_cache), "-C", str(self.target_root), "."], check=False)
+            subprocess.run([
+                "tar", "cJpf", str(seed_cache),
+                "--exclude=./proc/*", "--exclude=./sys/*", "--exclude=./dev/*", "--exclude=./tmp/*", "--exclude=./run/*",
+                "-C", str(self.target_root), "."
+            ], check=False)
         except Exception as e:
             logger.warning(f"Could not save seed tarball cache: {e}")
 
