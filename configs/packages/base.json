@@ -15,6 +15,9 @@
     "locales",
     "ca-certificates",
     "firmware-linux-free",
-    "firmware-linux-nonfree"
+    "firmware-linux-nonfree",
+    "firmware-realtek",
+    "firmware-misc-nonfree",
+    "firmware-iwlwifi"
   ]
 }
