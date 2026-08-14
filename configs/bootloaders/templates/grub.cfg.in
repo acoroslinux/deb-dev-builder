@@ -1,0 +1,53 @@
+set default=0
+set timeout=15
+set timeout_style=menu
+
+# Source graphical configuration, fonts and display settings
+if [ -f /boot/grub/config.cfg ]; then
+    source /boot/grub/config.cfg
+fi
+
+# Main Live Boot Entries
+menuentry '@@BOOT_TITLE@@ @@DESKTOP@@ (Standard Live)' --class debian --class gnu-linux --class os --hotkey=l {
+    search --no-floppy --set=root --label @@VOL_ID@@
+    if [ -z "$root" ]; then
+        search --no-floppy --set=root --file /live/vmlinuz
+    fi
+    linux /live/vmlinuz @@KERNEL_PARAMS@@ locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+    initrd /live/initrd.img
+}
+
+menuentry '@@BOOT_TITLE@@ @@DESKTOP@@ (Copy to RAM)' --class debian --class gnu-linux --class os --hotkey=r {
+    search --no-floppy --set=root --label @@VOL_ID@@
+    if [ -z "$root" ]; then
+        search --no-floppy --set=root --file /live/vmlinuz
+    fi
+    linux /live/vmlinuz @@KERNEL_PARAMS@@ toram locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+    initrd /live/initrd.img
+}
+
+menuentry '@@BOOT_TITLE@@ @@DESKTOP@@ (with Persistence)' --class debian --class gnu-linux --class os --hotkey=p {
+    search --no-floppy --set=root --label @@VOL_ID@@
+    if [ -z "$root" ]; then
+        search --no-floppy --set=root --file /live/vmlinuz
+    fi
+    linux /live/vmlinuz @@KERNEL_PARAMS@@ persistence locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+    initrd /live/initrd.img
+}
+
+menuentry '@@BOOT_TITLE@@ @@DESKTOP@@ (Safe Graphics - nomodeset)' --class debian --class gnu-linux --class os --hotkey=f {
+    search --no-floppy --set=root --label @@VOL_ID@@
+    if [ -z "$root" ]; then
+        search --no-floppy --set=root --file /live/vmlinuz
+    fi
+    linux /live/vmlinuz @@KERNEL_PARAMS@@ nomodeset xci586 noapic acpi=off locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
+    initrd /live/initrd.img
+}
+
+menuentry 'Reboot' --class reboot {
+    reboot
+}
+
+menuentry 'Power Off' --class shutdown {
+    halt
+}

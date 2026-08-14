@@ -89,6 +89,33 @@ class ISOEngine:
             base = f"{base} union=overlay"
         return base.strip()
 
+    def _get_template_placeholders(self) -> Dict[str, str]:
+        iso_label = self._get_iso_label()
+        kernel_params = self._get_kernel_params()
+        desktop = str(self.config.get("desktop", "xfce")).upper()
+        distro = str(self.config.get("distro", "Debian")).title()
+        arch = self.arch
+        keymap = self.config.get("keymap", "us")
+        locale = self.config.get("locale", "en_US.UTF-8")
+        live_user = self.config.get("live_user", "liveuser")
+        if isinstance(live_user, dict):
+            live_user = live_user.get("name", "liveuser")
+
+        return {
+            "@@VOL_ID@@": iso_label,
+            "@@ISO_LABEL@@": iso_label,
+            "@@BOOT_TITLE@@": f"{distro} Modern",
+            "@@DISTRO_NAME@@": f"{distro} Modern",
+            "@@DESKTOP@@": desktop,
+            "@@ARCH@@": arch,
+            "@@KERNEL_PARAMS@@": kernel_params,
+            "@@BOOT_CMDLINE@@": kernel_params,
+            "@@KEYMAP@@": keymap,
+            "@@LOCALE@@": locale,
+            "@@LIVE_USER@@": live_user,
+            "@@SPLASHIMAGE@@": "splash.png"
+        }
+
     def _find_kernel_and_initramfs(self) -> Tuple[str, str]:
         boot_dir = self.target_root / "boot"
         kernel = None
@@ -442,30 +469,37 @@ class ISOEngine:
 
         iso_bin = isolinux_target / "isolinux.bin"
         if iso_bin.exists() and iso_bin.stat().st_size > 0:
-            iso_label = self._get_iso_label()
-            kernel_params = self._get_kernel_params()
-            syslinux_cfg = (
-                "UI vesamenu.c32\n"
-                "PROMPT 0\n"
-                "TIMEOUT 50\n\n"
-                f"LABEL live\n"
-                f"  MENU LABEL ^{iso_label} Live (Standard)\n"
-                f"  MENU DEFAULT\n"
-                f"  KERNEL /live/vmlinuz\n"
-                f"  APPEND initrd=/live/initrd.img {kernel_params}\n\n"
-                f"LABEL live-toram\n"
-                f"  MENU LABEL {iso_label} Live (^Copy to RAM)\n"
-                f"  KERNEL /live/vmlinuz\n"
-                f"  APPEND initrd=/live/initrd.img {kernel_params} toram\n\n"
-                f"LABEL live-persistence\n"
-                f"  MENU LABEL {iso_label} Live (with ^Persistence)\n"
-                f"  KERNEL /live/vmlinuz\n"
-                f"  APPEND initrd=/live/initrd.img {kernel_params} persistence\n\n"
-                f"LABEL failsafe\n"
-                f"  MENU LABEL {iso_label} Live (^Failsafe Mode)\n"
-                f"  KERNEL /live/vmlinuz\n"
-                f"  APPEND initrd=/live/initrd.img {kernel_params} nomodeset xci586 noapic acpi=off\n"
-            )
+            isolinux_template = resolve_from_project("configs/bootloaders/templates/isolinux.cfg.in")
+            placeholders = self._get_template_placeholders()
+            if isolinux_template.exists():
+                syslinux_cfg = isolinux_template.read_text()
+                for k, v in placeholders.items():
+                    syslinux_cfg = syslinux_cfg.replace(k, str(v))
+            else:
+                iso_label = self._get_iso_label()
+                kernel_params = self._get_kernel_params()
+                syslinux_cfg = (
+                    "UI vesamenu.c32\n"
+                    "PROMPT 0\n"
+                    "TIMEOUT 50\n\n"
+                    f"LABEL live\n"
+                    f"  MENU LABEL ^{iso_label} Live (Standard)\n"
+                    f"  MENU DEFAULT\n"
+                    f"  KERNEL /live/vmlinuz\n"
+                    f"  APPEND initrd=/live/initrd.img {kernel_params}\n\n"
+                    f"LABEL live-toram\n"
+                    f"  MENU LABEL {iso_label} Live (^Copy to RAM)\n"
+                    f"  KERNEL /live/vmlinuz\n"
+                    f"  APPEND initrd=/live/initrd.img {kernel_params} toram\n\n"
+                    f"LABEL live-persistence\n"
+                    f"  MENU LABEL {iso_label} Live (with ^Persistence)\n"
+                    f"  KERNEL /live/vmlinuz\n"
+                    f"  APPEND initrd=/live/initrd.img {kernel_params} persistence\n\n"
+                    f"LABEL failsafe\n"
+                    f"  MENU LABEL {iso_label} Live (^Failsafe Mode)\n"
+                    f"  KERNEL /live/vmlinuz\n"
+                    f"  APPEND initrd=/live/initrd.img {kernel_params} nomodeset xci586 noapic acpi=off\n"
+                )
             if self.config.get("with_debian_installer"):
                 syslinux_cfg += (
                     "\nLABEL install\n"
@@ -506,49 +540,73 @@ class ISOEngine:
 
         iso_label = self._get_iso_label()
         kernel_params = self._get_kernel_params()
+        placeholders = self._get_template_placeholders()
 
-        config_cfg_text = (
-            "set default=0\n\n"
-            "if [ x$feature_default_font_path = xy ] ; then\n"
-            "    font=unicode\n"
-            "else\n"
-            "    font=$prefix/unicode.pf2\n"
-            "fi\n\n"
-            "if loadfont $font ; then\n"
-            "    set gfxmode=800x600\n"
-            "    set gfxpayload=keep\n"
-            "    insmod efi_gop\n"
-            "    insmod efi_uga\n"
-            "    insmod video_bochs\n"
-            "    insmod video_cirrus\n"
-            "else\n"
-            "    set gfxmode=auto\n"
-            "    insmod all_video\n"
-            "fi\n\n"
-            "insmod gfxterm\n"
-            "insmod png\n\n"
-            "terminal_output gfxterm\n"
-        )
+        # 1. Load config.cfg from template if available
+        config_template = resolve_from_project("configs/bootloaders/templates/config.cfg.in")
+        if config_template.exists():
+            config_cfg_text = config_template.read_text()
+            for k, v in placeholders.items():
+                config_cfg_text = config_cfg_text.replace(k, str(v))
+        else:
+            config_cfg_text = (
+                "set default=0\n\n"
+                "if [ x$feature_default_font_path = xy ] ; then\n"
+                "    font=unicode\n"
+                "else\n"
+                "    font=$prefix/unicode.pf2\n"
+                "fi\n\n"
+                "if loadfont $font ; then\n"
+                "    set gfxmode=800x600\n"
+                "    set gfxpayload=keep\n"
+                "    insmod efi_gop\n"
+                "    insmod efi_uga\n"
+                "    insmod video_bochs\n"
+                "    insmod video_cirrus\n"
+                "else\n"
+                "    set gfxmode=auto\n"
+                "    insmod all_video\n"
+                "fi\n\n"
+                "insmod gfxterm\n"
+                "insmod png\n\n"
+                "terminal_output gfxterm\n"
+            )
 
-        grub_cfg_text = (
-            "source /boot/grub/config.cfg\n\n"
-            f"menuentry \"{iso_label} Live (Standard)\" --hotkey=l {{\n"
-            f"    linux /live/vmlinuz {kernel_params}\n"
-            "    initrd /live/initrd.img\n"
-            "}\n\n"
-            f"menuentry \"{iso_label} Live (Copy to RAM)\" --hotkey=r {{\n"
-            f"    linux /live/vmlinuz {kernel_params} toram\n"
-            "    initrd /live/initrd.img\n"
-            "}\n\n"
-            f"menuentry \"{iso_label} Live (with Persistence)\" --hotkey=p {{\n"
-            f"    linux /live/vmlinuz {kernel_params} persistence\n"
-            "    initrd /live/initrd.img\n"
-            "}\n\n"
-            f"menuentry \"{iso_label} Live (Failsafe Mode)\" --hotkey=f {{\n"
-            f"    linux /live/vmlinuz {kernel_params} nomodeset xci586 noapic acpi=off\n"
-            "    initrd /live/initrd.img\n"
-            "}\n"
-        )
+        # 2. Load grub.cfg from template if available
+        grub_template = resolve_from_project("configs/bootloaders/templates/grub.cfg.in")
+        if grub_template.exists():
+            grub_cfg_text = grub_template.read_text()
+            for k, v in placeholders.items():
+                grub_cfg_text = grub_cfg_text.replace(k, str(v))
+        else:
+            grub_cfg_text = (
+                "source /boot/grub/config.cfg\n\n"
+                f"menuentry \"{iso_label} Live (Standard)\" --hotkey=l {{\n"
+                f"    linux /live/vmlinuz {kernel_params}\n"
+                "    initrd /live/initrd.img\n"
+                "}\n\n"
+                f"menuentry \"{iso_label} Live (Copy to RAM)\" --hotkey=r {{\n"
+                f"    linux /live/vmlinuz {kernel_params} toram\n"
+                "    initrd /live/initrd.img\n"
+                "}\n\n"
+                f"menuentry \"{iso_label} Live (with Persistence)\" --hotkey=p {{\n"
+                f"    linux /live/vmlinuz {kernel_params} persistence\n"
+                "    initrd /live/initrd.img\n"
+                "}\n\n"
+                f"menuentry \"{iso_label} Live (Failsafe Mode)\" --hotkey=f {{\n"
+                f"    linux /live/vmlinuz {kernel_params} nomodeset xci586 noapic acpi=off\n"
+                "    initrd /live/initrd.img\n"
+                "}\n"
+            )
+
+        # 3. Load loopback.cfg from template if available
+        loopback_template = resolve_from_project("configs/bootloaders/templates/loopback.cfg.in")
+        if loopback_template.exists():
+            loopback_cfg_text = loopback_template.read_text()
+            for k, v in placeholders.items():
+                loopback_cfg_text = loopback_cfg_text.replace(k, str(v))
+        else:
+            loopback_cfg_text = "source /boot/grub/grub.cfg\n"
 
         if self.config.get("with_debian_installer"):
             install_dir = self.iso_staging / "install"

@@ -1,0 +1,59 @@
+UI vesamenu.c32
+PROMPT 0
+TIMEOUT 150
+ONTIMEOUT live
+
+MENU TABMSG Press ENTER to boot or TAB to edit a menu entry
+MENU AUTOBOOT BIOS default device boot in # second{,s}...
+MENU TITLE @@BOOT_TITLE@@ @@DESKTOP@@ (@@ARCH@@)
+MENU BACKGROUND /isolinux/splash.png
+MENU RESOLUTION 640 480
+MENU WIDTH 78
+MENU MARGIN 1
+MENU ROWS 12
+MENU VSHIFT 2
+MENU TIMEOUTROW 13
+MENU TABMSGROW 2
+MENU CMDLINEROW 16
+MENU HELPMSGROW 20
+
+MENU COLOR title        * #FF5255FF *
+MENU COLOR border       * #00000000 #00000000 none
+MENU COLOR sel          * #ffffffff #FF5255FF *
+
+LABEL live
+  MENU LABEL @@BOOT_TITLE@@ @@DESKTOP@@ (Standard Live)
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+
+LABEL liveram
+  MENU LABEL @@BOOT_TITLE@@ @@DESKTOP@@ (Copy to RAM)
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ toram locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+
+LABEL livepersist
+  MENU LABEL @@BOOT_TITLE@@ @@DESKTOP@@ (with Persistence)
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ persistence locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+
+LABEL livenogfx
+  MENU LABEL @@BOOT_TITLE@@ @@DESKTOP@@ (Safe Graphics - nomodeset)
+  KERNEL /live/vmlinuz
+  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ nomodeset xci586 noapic acpi=off locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
+
+LABEL c
+  MENU LABEL Boot first HD found by BIOS
+  COM32 chain.c32
+  APPEND hd0
+
+LABEL memtest
+  MENU LABEL Run Memtest86+ (RAM test)
+  LINUX /live/memtest
+
+LABEL reboot
+  MENU LABEL Reboot
+  COM32 reboot.c32
+
+LABEL poweroff
+  MENU LABEL Power Off
+  COM32 poweroff.c32
