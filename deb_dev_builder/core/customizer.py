@@ -86,7 +86,7 @@ class SystemCustomizer:
             services = services.get("enable", [])
         services_to_enable = list(services)
 
-        for auto_svc in ["NetworkManager", "dbus"]:
+        for auto_svc in ["NetworkManager"]:
             if auto_svc not in services_to_enable:
                 unit = self.target_root / "usr" / "lib" / "systemd" / "system" / f"{auto_svc}.service"
                 if unit.exists():
