@@ -171,14 +171,20 @@ class ISOEngine:
             early_cfg.write_text(
                 "insmod search\n"
                 "insmod search_fs_file\n"
+                "insmod search_label\n"
                 "insmod iso9660\n"
                 "insmod fat\n"
                 "insmod part_gpt\n"
                 "insmod part_msdos\n"
-                "search --no-floppy --set=root --file /.disk/info\n"
-                "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /live/vmlinuz; fi\n"
-                "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /install/vmlinuz; fi\n"
-                "set prefix=($root)/boot/grub\n"
+                f"if search --no-floppy --set=root --label \"{self._get_iso_label()}\"; then\n"
+                "    set prefix=($root)/boot/grub\n"
+                "elif search --no-floppy --set=root --file /.disk/info; then\n"
+                "    set prefix=($root)/boot/grub\n"
+                "elif search --no-floppy --set=root --file /live/vmlinuz; then\n"
+                "    set prefix=($root)/boot/grub\n"
+                "elif search --no-floppy --set=root --file /install/vmlinuz; then\n"
+                "    set prefix=($root)/boot/grub\n"
+                "fi\n"
                 "configfile ($root)/boot/grub/grub.cfg\n"
             )
 
@@ -274,11 +280,23 @@ class ISOEngine:
                         if item.is_file() and item.suffix in [".mod", ".lst", ".pf2"]:
                             shutil.copy2(item, dst_efi_dir / item.name)
                     # Create the platform-specific grub.cfg that configures root and loads main grub.cfg
+                    iso_label = self._get_iso_label()
                     (dst_efi_dir / "grub.cfg").write_text(
                         "insmod efidisk\n"
-                        "search --no-floppy --set=root --file /.disk/info\n"
-                        "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /live/vmlinuz; fi\n"
-                        "set prefix=($root)/boot/grub\n"
+                        "insmod part_gpt\n"
+                        "insmod part_msdos\n"
+                        "insmod fat\n"
+                        "insmod iso9660\n"
+                        "insmod search\n"
+                        "insmod search_fs_file\n"
+                        "insmod search_label\n"
+                        f"if search --no-floppy --set=root --label \"{iso_label}\"; then\n"
+                        "    set prefix=($root)/boot/grub\n"
+                        "elif search --no-floppy --set=root --file /.disk/info; then\n"
+                        "    set prefix=($root)/boot/grub\n"
+                        "elif search --no-floppy --set=root --file /live/vmlinuz; then\n"
+                        "    set prefix=($root)/boot/grub\n"
+                        "fi\n"
                         "configfile ($root)/boot/grub/grub.cfg\n"
                     )
                     break
@@ -296,6 +314,7 @@ class ISOEngine:
                 continue
 
             # Write the embedded early config for this specific platform
+            iso_label = self._get_iso_label()
             early_cfg = self.workdir / f"early-efi-grub-{fmt}.cfg"
             embedded_cfg = (
                 "insmod efidisk\n"
@@ -307,10 +326,15 @@ class ISOEngine:
                 "insmod search_fs_file\n"
                 "insmod search_label\n"
                 "insmod normal\n"
-                "search --no-floppy --set=root --file /.disk/info\n"
-                "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /live/vmlinuz; fi\n"
-                "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /boot/grub/grub.cfg; fi\n"
-                "set prefix=($root)/boot/grub\n"
+                f"if search --no-floppy --set=root --label \"{iso_label}\"; then\n"
+                "    set prefix=($root)/boot/grub\n"
+                "elif search --no-floppy --set=root --file /.disk/info; then\n"
+                "    set prefix=($root)/boot/grub\n"
+                "elif search --no-floppy --set=root --file /live/vmlinuz; then\n"
+                "    set prefix=($root)/boot/grub\n"
+                "elif search --no-floppy --set=root --file /boot/grub/grub.cfg; then\n"
+                "    set prefix=($root)/boot/grub\n"
+                "fi\n"
                 "configfile ($root)/boot/grub/grub.cfg\n"
             )
             early_cfg.write_text(embedded_cfg)
@@ -328,10 +352,24 @@ class ISOEngine:
             )
 
         # Write EFI/BOOT/grub.cfg as well for standalone EFI loaders
+        iso_label = self._get_iso_label()
         (iso_efi_dir / "grub.cfg").write_text(
-            "search --no-floppy --set=root --file /.disk/info\n"
-            "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /live/vmlinuz; fi\n"
-            "set prefix=($root)/boot/grub\n"
+            "insmod efidisk\n"
+            "insmod part_gpt\n"
+            "insmod part_msdos\n"
+            "insmod fat\n"
+            "insmod iso9660\n"
+            "insmod search\n"
+            "insmod search_fs_file\n"
+            "insmod search_label\n"
+            "insmod normal\n"
+            f"if search --no-floppy --set=root --label \"{iso_label}\"; then\n"
+            "    set prefix=($root)/boot/grub\n"
+            "elif search --no-floppy --set=root --file /.disk/info; then\n"
+            "    set prefix=($root)/boot/grub\n"
+            "elif search --no-floppy --set=root --file /live/vmlinuz; then\n"
+            "    set prefix=($root)/boot/grub\n"
+            "fi\n"
             "configfile ($root)/boot/grub/grub.cfg\n"
         )
 
@@ -468,8 +506,17 @@ class ISOEngine:
             "insmod ext2\n"
             "insmod fat\n"
             "insmod iso9660\n"
+            "insmod search\n"
+            "insmod search_label\n"
+            "insmod search_fs_file\n"
             "insmod normal\n\n"
-            "search --no-floppy --set=root --file /live/vmlinuz\n\n"
+            f"if search --no-floppy --set=root --label \"{iso_label}\"; then\n"
+            "    set prefix=($root)/boot/grub\n"
+            "elif search --no-floppy --set=root --file /.disk/info; then\n"
+            "    set prefix=($root)/boot/grub\n"
+            "elif search --no-floppy --set=root --file /live/vmlinuz; then\n"
+            "    set prefix=($root)/boot/grub\n"
+            "fi\n\n"
             f"menuentry '{iso_label} Live (Standard)' {{\n"
             "    search --no-floppy --set=root --file /live/vmlinuz\n"
             f"    linux /live/vmlinuz {kernel_params}\n"
