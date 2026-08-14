@@ -154,9 +154,20 @@ class SystemCustomizer:
             sddm_conf = self.target_root / sddm_rel
             sddm_conf.parent.mkdir(parents=True, exist_ok=True)
             sddm_conf.write_text(
-                f"[Autologin]\nUser={live_user}\nSession=plasma\nRelogin=false\n\n"
+                f"[Autologin]\nUser={live_user}\nSession={session_name}\nRelogin=false\n\n"
                 f"[General]\nDisplayServer=x11\n"
             )
+
+        # Set default-display-manager if lightdm or sddm is active
+        if dm:
+            dm_path = self.target_root / "etc" / "X11" / "default-display-manager"
+            dm_path.parent.mkdir(parents=True, exist_ok=True)
+            if dm == "sddm":
+                dm_path.write_text("/usr/bin/sddm\n")
+            elif dm == "lightdm":
+                dm_path.write_text("/usr/sbin/lightdm\n")
+            elif dm in {"gdm", "gdm3"}:
+                dm_path.write_text("/usr/sbin/gdm3\n")
 
         # GDM / GDM3 configuration
         gdm_content = (
