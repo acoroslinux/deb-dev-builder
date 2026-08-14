@@ -507,44 +507,44 @@ class ISOEngine:
         iso_label = self._get_iso_label()
         kernel_params = self._get_kernel_params()
 
-        grub_cfg_text = (
-            "set default=0\n"
-            "set timeout=10\n\n"
-            "insmod gzio\n"
-            "insmod part_gpt\n"
-            "insmod part_msdos\n"
-            "insmod ext2\n"
-            "insmod fat\n"
-            "insmod iso9660\n"
-            "insmod search\n"
-            "insmod search_label\n"
-            "insmod search_fs_file\n"
-            "insmod normal\n"
-            "insmod test\n\n"
-            f"search --no-floppy --set=root --label {iso_label}\n"
-            "if [ -z \"$root\" ]; then\n"
-            "    search --no-floppy --set=root --file /.disk/info\n"
-            "fi\n"
-            "if [ -z \"$root\" ]; then\n"
-            "    search --no-floppy --set=root --file /live/vmlinuz\n"
+        config_cfg_text = (
+            "set default=0\n\n"
+            "if [ x$feature_default_font_path = xy ] ; then\n"
+            "    font=unicode\n"
+            "else\n"
+            "    font=$prefix/unicode.pf2\n"
             "fi\n\n"
-            f"menuentry \"{iso_label} Live (Standard)\" {{\n"
-            "    search --no-floppy --set=root --file /live/vmlinuz\n"
+            "if loadfont $font ; then\n"
+            "    set gfxmode=800x600\n"
+            "    set gfxpayload=keep\n"
+            "    insmod efi_gop\n"
+            "    insmod efi_uga\n"
+            "    insmod video_bochs\n"
+            "    insmod video_cirrus\n"
+            "else\n"
+            "    set gfxmode=auto\n"
+            "    insmod all_video\n"
+            "fi\n\n"
+            "insmod gfxterm\n"
+            "insmod png\n\n"
+            "terminal_output gfxterm\n"
+        )
+
+        grub_cfg_text = (
+            "source /boot/grub/config.cfg\n\n"
+            f"menuentry \"{iso_label} Live (Standard)\" --hotkey=l {{\n"
             f"    linux /live/vmlinuz {kernel_params}\n"
             "    initrd /live/initrd.img\n"
             "}}\n\n"
-            f"menuentry \"{iso_label} Live (Copy to RAM)\" {{\n"
-            "    search --no-floppy --set=root --file /live/vmlinuz\n"
+            f"menuentry \"{iso_label} Live (Copy to RAM)\" --hotkey=r {{\n"
             f"    linux /live/vmlinuz {kernel_params} toram\n"
             "    initrd /live/initrd.img\n"
             "}}\n\n"
-            f"menuentry \"{iso_label} Live (with Persistence)\" {{\n"
-            "    search --no-floppy --set=root --file /live/vmlinuz\n"
+            f"menuentry \"{iso_label} Live (with Persistence)\" --hotkey=p {{\n"
             f"    linux /live/vmlinuz {kernel_params} persistence\n"
             "    initrd /live/initrd.img\n"
             "}}\n\n"
-            f"menuentry \"{iso_label} Live (Failsafe Mode)\" {{\n"
-            "    search --no-floppy --set=root --file /live/vmlinuz\n"
+            f"menuentry \"{iso_label} Live (Failsafe Mode)\" --hotkey=f {{\n"
             f"    linux /live/vmlinuz {kernel_params} nomodeset xci586 noapic acpi=off\n"
             "    initrd /live/initrd.img\n"
             "}}\n"
@@ -698,29 +698,32 @@ class ISOEngine:
             self.iso_staging / "boot" / "grub",
             self.iso_staging / "boot" / "grub2",
             self.iso_staging / "EFI" / "BOOT",
+            self.iso_staging / "EFI" / "boot",
         ]:
             d.mkdir(parents=True, exist_ok=True)
+            (d / "config.cfg").write_text(config_cfg_text)
             (d / "grub.cfg").write_text(grub_cfg_text)
 
-        (self.iso_staging / "boot" / "grub" / "loopback.cfg").write_text(grub_cfg_text)
+        (self.iso_staging / "boot" / "grub" / "loopback.cfg").write_text("source /boot/grub/grub.cfg\n")
+
+        # Copy unicode.pf2 font if available
+        for font_candidate in [
+            self.target_root / "usr" / "share" / "grub" / "unicode.pf2",
+            self.workdir / "build_host" / "usr" / "share" / "grub" / "unicode.pf2",
+            Path("/usr/share/grub/unicode.pf2"),
+        ]:
+            if font_candidate.exists():
+                shutil.copy2(font_candidate, self.iso_staging / "boot" / "grub" / "unicode.pf2")
+                break
 
         for platform_dir in [self.iso_staging / "boot" / "grub" / "x86_64-efi", self.iso_staging / "boot" / "grub" / "i386-efi"]:
             platform_dir.mkdir(parents=True, exist_ok=True)
             (platform_dir / "grub.cfg").write_text(
-                "insmod efidisk\n"
-                "insmod search\n"
-                "insmod search_fs_file\n"
-                "insmod search_label\n"
-                "insmod test\n"
-                f"search --no-floppy --set=root --label {iso_label}\n"
-                "if [ -z \"$root\" ]; then\n"
-                "    search --no-floppy --set=root --file /.disk/info\n"
+                "if [ x$grub_platform == xefi -a x$lockdown != xy ] ; then\n"
+                "    insmod part_gpt\n"
+                "    insmod part_msdos\n"
                 "fi\n"
-                "if [ -z \"$root\" ]; then\n"
-                "    search --no-floppy --set=root --file /live/vmlinuz\n"
-                "fi\n"
-                "set prefix=($root)/boot/grub\n"
-                "configfile ($root)/boot/grub/grub.cfg\n"
+                "source /boot/grub/grub.cfg\n"
             )
 
         if self.should_use_syslinux():
