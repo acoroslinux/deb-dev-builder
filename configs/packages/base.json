@@ -11,6 +11,8 @@
     "iputils-ping",
     "curl",
     "wget",
+    "zstd",
+    "locales",
     "ca-certificates",
     "firmware-linux-free",
     "firmware-linux-nonfree"

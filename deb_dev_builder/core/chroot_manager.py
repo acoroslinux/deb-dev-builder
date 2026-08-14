@@ -39,10 +39,19 @@ class ChrootManager:
             cmd.extend([src, str(target)])
             subprocess.run(cmd, check=False, stderr=subprocess.DEVNULL)
 
+        policy_file = self.target_root / "usr" / "sbin" / "policy-rc.d"
+        policy_file.parent.mkdir(parents=True, exist_ok=True)
+        policy_file.write_text("#!/bin/sh\nexit 101\n")
+        policy_file.chmod(0o755)
+
     def umount_virtual_fs(self):
         if self.mode == "mock":
             logger.info("[MOCK CHROOT] Simulating unmounting virtual filesystems.")
             return
+
+        policy_file = self.target_root / "usr" / "sbin" / "policy-rc.d"
+        if policy_file.exists():
+            policy_file.unlink()
 
         for path in [
             self.target_root / "dev" / "pts",
@@ -58,6 +67,8 @@ class ChrootManager:
         command: Union[str, List[str]],
         check: bool = True,
         env: Optional[dict] = None,
+        capture_output: bool = False,
+        text: bool = False,
     ) -> subprocess.CompletedProcess:
         if self.mode == "mock":
             cmd_str = command if isinstance(command, str) else " ".join(command)
@@ -75,4 +86,4 @@ class ChrootManager:
         if env:
             full_env.update(env)
 
-        return subprocess.run(cmd, check=check, env=full_env)
+        return subprocess.run(cmd, check=check, env=full_env, capture_output=capture_output, text=text)

@@ -1,3 +1,13 @@
 {
-  "packages": ["xorg", "xterm", "feh", "picom", "dmenu", "i3status"]
+  "packages": [
+    "xorg",
+    "xserver-xorg",
+    "xserver-xorg-video-all",
+    "xserver-xorg-video-vmware",
+    "xserver-xorg-input-all",
+    "x11-xserver-utils",
+    "x11-utils",
+    "dbus-x11",
+    "desktop-base"
+  ]
 }

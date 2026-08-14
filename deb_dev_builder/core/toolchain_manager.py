@@ -17,8 +17,8 @@ class ToolchainManagerError(Exception):
 class ToolchainManager:
     """
     Manages an isolated secondary chroot (build_host), containing all
-    build and ISO creation tools (mmdebstrap, debootstrap, mksquashfs, grub-mkstandalone, xorriso, mtools).
-    This ensures the deb-dev-builder is 100% host distribution agnostic.
+    build and ISO creation tools (mmdebstrap, debootstrap, mksquashfs, grub-mkstandalone, xorriso, mtools, qemu-utils).
+    This ensures deb-dev-builder is 100% host distribution agnostic.
     """
 
     def __init__(
@@ -39,9 +39,14 @@ class ToolchainManager:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.is_mounted = False
 
+        from deb_dev_builder.core.path_utils import resolve_from_project
+        self.project_root = resolve_from_project(".")
+        rel_proj = self.project_root.relative_to("/")
+        self.project_mount = self.build_host_dir / rel_proj
+
     def check_host_tools(self) -> bool:
         """Check if primary ISO packaging tools exist on the host."""
-        required_tools = ["mksquashfs", "xorriso", "grub-mkstandalone", "mtools"]
+        required_tools = ["mksquashfs", "xorriso", "grub-mkstandalone", "mtools", "zstd"]
         missing = [tool for tool in required_tools if shutil.which(tool) is None]
         if missing:
             logger.info(f"Missing tools on host: {', '.join(missing)}")
@@ -59,10 +64,51 @@ class ToolchainManager:
 
         self.bootstrap_build_host()
 
+    def _is_bootstrapped(self) -> bool:
+        return (self.build_host_dir / "etc" / "os-release").exists() and (self.build_host_dir / "usr" / "bin" / "xorriso").exists()
+
     def bootstrap_build_host(self):
-        logger.info(f"Initializing isolated build environment (build_host) at: {self.build_host_dir}")
+        if self._is_bootstrapped():
+            logger.info(f"♻️ Reusing existing isolated build_host environment at: {self.build_host_dir}")
+            return
+
+        logger.info(f"🚀 Initializing isolated build environment (build_host) at: {self.build_host_dir}")
         self.build_host_dir.mkdir(parents=True, exist_ok=True)
-        (self.build_host_dir / "usr" / "bin").mkdir(parents=True, exist_ok=True)
+
+        mirror = "http://deb.debian.org/debian"
+        suite = "bookworm"
+
+        host_tools = [
+            "squashfs-tools", "zstd", "xorriso", "grub-common", "grub-pc-bin",
+            "grub-efi-amd64-bin", "grub-efi-ia32-bin", "mtools", "dosfstools", "qemu-utils",
+            "syslinux-utils", "fdisk", "util-linux", "ca-certificates"
+        ]
+
+        if shutil.which("mmdebstrap"):
+            cmd = [
+                "mmdebstrap",
+                "--variant=essential",
+                f"--include={','.join(host_tools)}",
+                suite,
+                str(self.build_host_dir),
+                mirror,
+            ]
+        elif shutil.which("debootstrap"):
+            cmd = [
+                "debootstrap",
+                f"--include={','.join(host_tools)}",
+                suite,
+                str(self.build_host_dir),
+                mirror,
+            ]
+        else:
+            logger.warning("Neither mmdebstrap nor debootstrap found on host system. Using host tools directly.")
+            return
+
+        res = subprocess.run(cmd, check=False)
+        if res.returncode != 0:
+            logger.warning(f"Build-host bootstrap failed with code {res.returncode}; falling back to host binaries.")
+            return
 
         host_resolv = Path("/etc/resolv.conf")
         if host_resolv.exists():
@@ -70,14 +116,16 @@ class ToolchainManager:
             resolv_dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(host_resolv, resolv_dest)
 
+        logger.info("✅ Isolated build_host environment ready!")
+
     def mount_virtual_fs(self):
         if self.mode == "mock":
             logger.info("[MOCK TOOLCHAIN] Mounting virtual filesystems into build_host.")
             self.is_mounted = True
             return
 
-        if not self.build_host_dir.exists():
-            self.build_host_dir.mkdir(parents=True, exist_ok=True)
+        if not self.build_host_dir.exists() or not self._is_bootstrapped():
+            return
 
         mounts = [
             ("proc", self.build_host_dir / "proc", "proc", None),
@@ -92,6 +140,9 @@ class ToolchainManager:
             cmd.extend([src, str(target)])
             subprocess.run(cmd, check=False, stderr=subprocess.DEVNULL)
 
+        self.project_mount.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["mount", "--bind", str(self.project_root), str(self.project_mount)], check=False)
+
         self.is_mounted = True
 
     def umount_virtual_fs(self):
@@ -100,7 +151,11 @@ class ToolchainManager:
             self.is_mounted = False
             return
 
+        if not self.build_host_dir.exists():
+            return
+
         for path in [
+            self.project_mount,
             self.build_host_dir / "dev",
             self.build_host_dir / "sys",
             self.build_host_dir / "proc",

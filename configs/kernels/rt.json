@@ -1,0 +1,4 @@
+{
+  "kernel": "rt",
+  "packages": ["linux-image-rt-amd64", "linux-headers-rt-amd64"]
+}

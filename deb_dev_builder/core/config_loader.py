@@ -95,6 +95,8 @@ class ConfigLoader:
         # 6. Desktop
         if desktop:
             config = self._merge_dicts(config, self.load_profile("desktops", desktop))
+            # Automatically include xorg package profile for display server support
+            config = self._merge_dicts(config, self.load_profile("packages", "xorg"))
 
         # 7. Kernel
         if kernel:

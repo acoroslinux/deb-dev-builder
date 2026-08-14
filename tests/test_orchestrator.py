@@ -29,6 +29,11 @@ class TestOrchestrator:
         report = orch.validate()
         assert report.get("valid") is True
 
+    def test_bootloader_profile_is_explicit_in_config(self):
+        orch = make_orchestrator(bootloader="grub2-uefi")
+        assert orch.config.get("bootloader", {}).get("type") == "grub2-uefi"
+        assert orch.config.get("bootloader_type") == "grub2-uefi"
+
     def test_mock_build_debian(self, tmp_path):
         orch = make_orchestrator(tmp_path=tmp_path, distro="debian-12", desktop="gnome")
         result = orch.build()

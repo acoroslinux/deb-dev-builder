@@ -9,8 +9,9 @@ from deb_dev_builder.core.apt_manager import APTManager
 from deb_dev_builder.core.customizer import SystemCustomizer
 from deb_dev_builder.core.iso_engine import ISOEngine
 from deb_dev_builder.core.disk_engine import DiskEngine
+from deb_dev_builder.core.container_engine import ContainerEngine
 from deb_dev_builder.core.config_loader import ConfigLoader
-from deb_dev_builder.core.path_utils import resolve_from_project
+from deb_dev_builder.core.path_utils import resolve_from_project, unmount_all_under
 import logging
 
 logger = logging.getLogger("orchestrator")
@@ -23,24 +24,26 @@ class BuildOrchestrator:
         self,
         arch: str = "amd64",
         config_path: str = "configs/global_build.json",
-        mode: str = "mock",
-        clean: bool = True,
-        distro: Optional[str] = "debian-12",
-        init_system: Optional[str] = "systemd",
+        distro: Optional[str] = None,
+        init_system: Optional[str] = None,
         desktop: Optional[str] = None,
-        kernel: Optional[str] = "kernel",
-        bootloader: Optional[str] = "grub2-hybrid",
-        variant: Optional[str] = "live",
+        kernel: Optional[str] = None,
+        bootloader: Optional[str] = None,
+        variant: Optional[str] = None,
         package_profiles: Optional[List[str]] = None,
         service_profiles: Optional[List[str]] = None,
         repo_profiles: Optional[List[str]] = None,
         live_profile: Optional[str] = None,
-        live_user: Optional[str] = None,
-        live_groups: Optional[List[str]] = None,
         output_format: str = "iso",
-        compression: str = "zstd",
+        mode: str = "mock",
+        clean: bool = True,
         generate_manifest: bool = True,
         with_calamares: bool = False,
+        with_debian_installer: bool = False,
+        preseed: Optional[str] = None,
+        di_mode: str = "live",
+        use_seed: bool = True,
+        recreate_seed: bool = False,
         multimedia_codecs: bool = False,
         with_flathub: bool = False,
         with_zram: bool = False,
@@ -48,8 +51,6 @@ class BuildOrchestrator:
     ):
         self.arch = arch
         self.config_path = config_path
-        self.mode = mode
-        self.clean = clean
         self.distro = distro
         self.init_system = init_system
         self.desktop = desktop
@@ -60,12 +61,16 @@ class BuildOrchestrator:
         self.service_profiles = service_profiles or []
         self.repo_profiles = repo_profiles or []
         self.live_profile = live_profile
-        self.live_user = live_user
-        self.live_groups = live_groups or []
-        self.output_format = output_format
-        self.compression = compression
+        self.output_format = output_format.lower()
+        self.mode = mode.lower()
+        self.clean = clean
         self.generate_manifest = generate_manifest
         self.with_calamares = with_calamares
+        self.with_debian_installer = with_debian_installer
+        self.preseed = preseed
+        self.di_mode = di_mode.lower()
+        self.use_seed = use_seed
+        self.recreate_seed = recreate_seed
         self.multimedia_codecs = multimedia_codecs
         self.with_flathub = with_flathub
         self.with_zram = with_zram
@@ -93,9 +98,24 @@ class BuildOrchestrator:
             repo_profiles=self.repo_profiles,
             live_profile=self.live_profile,
         )
+        selected_bootloader = self.bootloader or self.config.get("bootloader", {}).get("type") or "grub2-hybrid"
+        self.config["bootloader"] = {"type": selected_bootloader}
+        self.config["bootloader_type"] = selected_bootloader
         self.config["with_calamares"] = self.with_calamares
+        self.config["with_debian_installer"] = self.with_debian_installer
+        self.config["preseed"] = self.preseed
+        self.config["di_mode"] = self.di_mode
         self.config["with_flathub"] = self.with_flathub
         self.config["with_zram"] = self.with_zram
+
+        essential_boot_pkgs = [
+            "live-boot", "live-config", "live-config-systemd", "systemd-sysv",
+            "grub-pc-bin", "grub-efi-amd64-bin", "grub-efi-ia32-bin", "shim-signed",
+            "isolinux", "syslinux-common", "dosfstools", "mtools", "efibootmgr"
+        ]
+        for pkg in essential_boot_pkgs:
+            if pkg not in self.config.get("packages", []):
+                self.config.setdefault("packages", []).append(pkg)
 
     def validate(self) -> Dict[str, Any]:
         errors = []
@@ -115,6 +135,8 @@ class BuildOrchestrator:
     def build(self, output_name: Optional[str] = None) -> Path:
         name = output_name or f"deb-dev-{self.distro}-{self.arch}"
         if self.clean and self.mode != "mock":
+            if os.geteuid() == 0:
+                unmount_all_under(resolve_from_project("workdir"))
             if self.workdir.exists():
                 shutil.rmtree(self.workdir, ignore_errors=True)
 
@@ -127,14 +149,14 @@ class BuildOrchestrator:
         )
         toolchain.setup()
 
-        chroot = ChrootManager(self.target_root, self.mode, arch=self.arch)
+        chroot = ChrootManager(self.target_root, self.mode, cache_dir=resolve_from_project(f"cache/{self.arch}"), arch=self.arch)
         try:
             toolchain.mount_virtual_fs()
             chroot.mount_virtual_fs()
 
             apt = APTManager(chroot, self.config, toolchain=toolchain)
             suite = self.config.get("suite", "bookworm")
-            apt.bootstrap_rootfs(suite, self.arch)
+            apt.bootstrap_rootfs(suite, self.arch, use_seed=self.use_seed, recreate_seed=self.recreate_seed, reuse_existing=not self.clean)
             apt.configure_sources_list()
             apt.update_apt_cache()
 
@@ -147,18 +169,22 @@ class BuildOrchestrator:
             chroot.umount_virtual_fs()
 
             iso_engine = ISOEngine(self.workdir, self.target_root, name, self.config, self.mode, toolchain)
-            if self.output_format == "img":
+            disk_formats = {"img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi"}
+
+            if self.output_format in disk_formats:
                 disk_engine = DiskEngine(self.workdir, self.target_root, name, self.config, self.mode)
-                artifact = disk_engine.build_disk_image()
+                artifact = disk_engine.build_disk_image(target_format=self.output_format)
+            elif self.output_format in {"container", "oci"}:
+                container_engine = ContainerEngine(self.target_root, name, self.config, self.mode)
+                artifact = container_engine.build_oci_archive()
             elif self.output_format == "tarball":
                 artifact = iso_engine.build_tarball()
             else:
                 artifact = iso_engine.build_iso()
 
             if self.generate_manifest and artifact and artifact.exists():
-                self._generate_checksums(artifact)
+                self._generate_checksums(artifact, chroot=chroot)
 
-            from deb_dev_builder.core.path_utils import resolve_from_project
             output_dir = resolve_from_project("output")
             self._fix_output_permissions(output_dir)
 
@@ -173,7 +199,9 @@ class BuildOrchestrator:
             except Exception:
                 pass
 
-            from deb_dev_builder.core.path_utils import resolve_from_project
+            if self.mode != "mock" and os.geteuid() == 0:
+                unmount_all_under(resolve_from_project("workdir"))
+
             output_dir = resolve_from_project("output")
             self._fix_output_permissions(output_dir)
 
@@ -203,7 +231,7 @@ class BuildOrchestrator:
             except Exception as e:
                 logger.warning(f"Could not update output ownership: {e}")
 
-    def _generate_checksums(self, artifact_path: Path):
+    def _generate_checksums(self, artifact_path: Path, chroot: Optional[ChrootManager] = None):
         if not artifact_path or not artifact_path.exists():
             return
         import hashlib
@@ -218,3 +246,16 @@ class BuildOrchestrator:
         md5_path = artifact_path.with_name(f"{artifact_path.name}.md5")
         sha256_path.write_text(f"{sha256.hexdigest()}  {artifact_path.name}\n")
         md5_path.write_text(f"{md5.hexdigest()}  {artifact_path.name}\n")
+
+        manifest_path = artifact_path.with_name(f"{artifact_path.stem}.manifest")
+        try:
+            if chroot and chroot.mode != "mock":
+                dpkg_res = chroot.run_in_chroot(["dpkg-query", "-W", "-f=${Package}\t${Version}\n"], check=False, capture_output=True, text=True)
+                if dpkg_res.returncode == 0 and dpkg_res.stdout:
+                    manifest_path.write_text(dpkg_res.stdout)
+                else:
+                    manifest_path.write_text(f"# Package manifest for {artifact_path.name}\n")
+            else:
+                manifest_path.write_text(f"# Package manifest for {artifact_path.name}\n")
+        except Exception as e:
+            logger.warning(f"Could not write manifest file: {e}")

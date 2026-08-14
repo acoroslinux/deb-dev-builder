@@ -4,6 +4,10 @@
   "packages": [
     "xfce4",
     "xfce4-goodies",
-    "lightdm"
+    "lightdm",
+    "lightdm-gtk-greeter",
+    "xfce4-terminal",
+    "xfce4-power-manager",
+    "xfce4-notifyd"
   ]
 }

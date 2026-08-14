@@ -1,3 +1,3 @@
 {
-  "packages": ["htop", "btop", "tmux", "zsh", "fzf", "ripgrep", "bat", "unzip", "p7zip-full", "rsync", "tree", "lsof"]
+  "packages": ["htop", "btop", "fastfetch", "tmux", "zsh", "fzf", "ripgrep", "bat", "unzip", "p7zip-full", "rsync", "tree", "lsof"]
 }

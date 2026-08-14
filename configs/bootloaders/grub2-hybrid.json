@@ -1,5 +1,5 @@
 {
-  "packages": ["grub-pc", "grub-efi-amd64-signed", "shim-signed"],
+  "packages": ["grub-pc", "grub-efi-amd64-bin", "grub-efi-ia32-bin", "grub-efi-amd64-signed", "shim-signed"],
   "bootloader": {
     "type": "grub2-hybrid"
   }

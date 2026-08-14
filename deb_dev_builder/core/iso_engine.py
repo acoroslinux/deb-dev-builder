@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -31,19 +32,62 @@ class ISOEngine:
         self.target_root = Path(target_root)
         self.output_name = output_name
         self.config = config
-        self.mode = mode
+        self.mode = mode.lower()
         self.toolchain = toolchain
         self.iso_staging = self.workdir / "iso_root"
         self.arch = config.get("architecture", "amd64")
 
+    def get_bootloader_type(self) -> str:
+        bootloader = self.config.get("bootloader", {})
+        if isinstance(bootloader, str):
+            raw_type = bootloader
+        else:
+            raw_type = bootloader.get("type") if isinstance(bootloader, dict) else None
+        if not raw_type:
+            raw_type = self.config.get("bootloader_type") or self.config.get("boot", {}).get("type") or "grub2-hybrid"
+
+        normalized = str(raw_type).strip().lower().replace("_", "-")
+        type_map = {
+            "grub2-hybrid": "grub2-hybrid",
+            "hybrid": "grub2-hybrid",
+            "grub2-uefi": "grub2-uefi",
+            "uefi": "grub2-uefi",
+            "efi": "grub2-uefi",
+            "grub2-bios": "grub2-bios",
+            "bios": "grub2-bios",
+            "syslinux": "syslinux",
+            "isolinux": "syslinux",
+        }
+        return type_map.get(normalized, "grub2-hybrid")
+
+    def should_use_grub_efi(self) -> bool:
+        return self.get_bootloader_type() in {"grub2-hybrid", "grub2-uefi"}
+
+    def should_use_grub_bios(self) -> bool:
+        return self.get_bootloader_type() in {"grub2-hybrid", "grub2-bios"}
+
+    def should_use_syslinux(self) -> bool:
+        return self.get_bootloader_type() == "syslinux"
+
     def _get_iso_label(self) -> str:
-        return self.config.get("iso_label", self.config.get("system", {}).get("iso_label", "DEB-DEV-LIVE"))
+        raw_label = self.config.get("iso_label", self.config.get("system", {}).get("iso_label", "DEBIAN_MODERN"))
+        sanitized = re.sub(r"[^A-Z0-9_]+", "_", raw_label.upper().strip())
+        sanitized = sanitized.strip("_")
+        return (sanitized or "DEBIAN_MODERN")[:32]
 
     def _get_kernel_params(self) -> str:
-        base = self.config.get("kernel_params", self.config.get("boot", {}).get("kernel_params", "boot=live components quiet splash"))
+        # Start from config or use a clean default — never embed quiet/splash so
+        # boot errors are always visible. The caller can add them back later.
+        base = self.config.get("kernel_params", self.config.get("boot", {}).get("kernel_params", ""))
+        # Strip out quiet/splash regardless of where they came from
+        base = " ".join(p for p in base.split() if p not in ("quiet", "splash"))
         if "boot=live" not in base:
             base = f"boot=live {base}"
-        return base
+        if "components" not in base:
+            base = f"{base} components"
+        if "union=overlay" not in base:
+            base = f"{base} union=overlay"
+        return base.strip()
 
     def _find_kernel_and_initramfs(self) -> Tuple[str, str]:
         boot_dir = self.target_root / "boot"
@@ -51,12 +95,12 @@ class ISOEngine:
         initramfs = None
 
         if boot_dir.exists():
-            for f in sorted(boot_dir.iterdir()):
-                if f.is_file():
-                    if f.name.startswith("vmlinuz"):
-                        kernel = f.name
-                    elif f.name.startswith("initrd.img") or f.name.startswith("initrd"):
-                        initramfs = f.name
+            vmlinuz_files = sorted([f.name for f in boot_dir.glob("vmlinuz-*") if not f.name.endswith(".old") and not f.name.endswith(".bak")])
+            initrd_files = sorted([f.name for f in boot_dir.glob("initrd.img-*") if not f.name.endswith(".old") and not f.name.endswith(".bak")])
+            if vmlinuz_files:
+                kernel = vmlinuz_files[-1]
+            if initrd_files:
+                initramfs = initrd_files[-1]
 
         return kernel or "vmlinuz", initramfs or "initrd.img"
 
@@ -68,6 +112,10 @@ class ISOEngine:
 
         if output_path.exists():
             output_path.unlink()
+
+        # Ensure essential mountpoint directories exist in rootfs before creating squashfs
+        for d in ["proc", "sys", "dev", "tmp", "run", "mnt", "media", "var/cache/apt"]:
+            (source_dir / d).mkdir(parents=True, exist_ok=True)
 
         compression = self.config.get("compression", "zstd")
         num_cpus = os.cpu_count() or 4
@@ -81,9 +129,106 @@ class ISOEngine:
                 "-b", "1M",
                 "-processors", str(num_cpus),
                 "-noappend",
-                "-e", "proc", "sys", "dev", "tmp", "var/cache/apt"
+                "-e", "proc/*", "sys/*", "dev/*", "tmp/*", "run/*", "var/cache/apt/*"
             ],
         )
+
+    def generate_grub_bios_core(self) -> Path:
+        eltorito_img = self.iso_staging / "boot" / "grub" / "grub_eltorito"
+        eltorito_img.parent.mkdir(parents=True, exist_ok=True)
+
+        if self.mode == "mock":
+            eltorito_img.touch()
+            return eltorito_img
+
+        # 1. Search for i386-pc directory with cdboot.img (exact live-build architecture)
+        search_roots = [
+            self.target_root,
+            self.workdir / "build_host",
+            Path("/")
+        ]
+        i386_dir = None
+        for r in search_roots:
+            for candidate in [
+                r / "usr" / "lib" / "grub" / "i386-pc",
+                r / "usr" / "lib" / "grub2" / "i386-pc"
+            ]:
+                if candidate.exists() and (candidate / "cdboot.img").exists():
+                    i386_dir = candidate
+                    break
+            if i386_dir:
+                break
+
+        if i386_dir:
+            # Copy all GRUB modules to /boot/grub/i386-pc (exact Debian live-build architecture)
+            target_i386_dir = self.iso_staging / "boot" / "grub" / "i386-pc"
+            target_i386_dir.mkdir(parents=True, exist_ok=True)
+            for item in i386_dir.glob("*"):
+                if item.is_file() and item.suffix in [".mod", ".lst", ".pf2"]:
+                    shutil.copy2(item, target_i386_dir / item.name)
+
+            early_cfg = self.workdir / "early-bios-grub.cfg"
+            early_cfg.write_text(
+                "insmod search\n"
+                "insmod search_fs_file\n"
+                "insmod iso9660\n"
+                "insmod fat\n"
+                "insmod part_gpt\n"
+                "insmod part_msdos\n"
+                "search --no-floppy --set=root --file /.disk/info\n"
+                "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /live/vmlinuz; fi\n"
+                "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /install/vmlinuz; fi\n"
+                "set prefix=($root)/boot/grub\n"
+                "configfile ($root)/boot/grub/grub.cfg\n"
+            )
+
+            core_tmp = self.workdir / "core_tmp.img"
+            if core_tmp.exists():
+                core_tmp.unlink()
+
+            res = self.toolchain.run_tool(
+                "grub-mkimage",
+                [
+                    "-d", str(i386_dir),
+                    "-c", str(early_cfg),
+                    "-o", str(core_tmp),
+                    "-O", "i386-pc",
+                    "--prefix=/boot/grub",
+                    "biosdisk", "iso9660", "search", "search_fs_file", "search_label", "configfile", "normal", "linux", "gzio", "part_gpt", "part_msdos", "fat", "ext2"
+                ],
+                check=False
+            )
+            if res.returncode == 0 and core_tmp.exists() and core_tmp.stat().st_size > 0:
+                cdboot_path = i386_dir / "cdboot.img"
+                with open(eltorito_img, "wb") as f_out:
+                    f_out.write(cdboot_path.read_bytes())
+                    f_out.write(core_tmp.read_bytes())
+                logger.info(f"Successfully generated live-build GRUB BIOS image: {eltorito_img} ({eltorito_img.stat().st_size} bytes)")
+                return eltorito_img
+
+        # 2. Fallback: Standalone GRUB BIOS image via grub-mkstandalone
+        embedded_cfg = self.workdir / "early-grub.cfg"
+        embedded_cfg.write_text(
+            "search --no-floppy --set=root --file /live/vmlinuz\n"
+            "set prefix=($root)/boot/grub\n"
+        )
+        res = self.toolchain.run_tool(
+            "grub-mkstandalone",
+            [
+                "--format=i386-pc",
+                "-o", str(eltorito_img),
+                f"boot/grub/grub.cfg={embedded_cfg}",
+                "--install-modules=iso9660 search search_fs_file search_label configfile normal biosdisk part_msdos part_gpt linux",
+                "--fonts=", "--locales=", "--themes="
+            ],
+            check=False
+        )
+        if res.returncode == 0 and eltorito_img.exists() and eltorito_img.stat().st_size > 0:
+            logger.info(f"Successfully compiled standalone GRUB BIOS image: {eltorito_img} ({eltorito_img.stat().st_size} bytes)")
+            return eltorito_img
+
+        logger.warning("Could not generate BIOS bootloader image.")
+        return eltorito_img
 
     def generate_grub_efi_image(self):
         efiboot_img = self.iso_staging / "boot" / "grub" / "efiboot.img"
@@ -93,55 +238,205 @@ class ISOEngine:
             efiboot_img.touch()
             return
 
-        formats_to_build = []
-        if self.arch in ["i686", "i386", "x86"]:
-            formats_to_build = [
-                ("i386-efi",   "BOOTIA32.EFI"),
-                ("x86_64-efi", "BOOTX64.EFI"),
-            ]
-        elif self.arch in ["x86_64", "amd64"]:
-            formats_to_build = [
-                ("x86_64-efi", "BOOTX64.EFI"),
-                ("i386-efi",   "BOOTIA32.EFI"),
-            ]
-        else:
-            primary_fmt, primary_file = _ARCH_EFI_MAP.get(self.arch, ("x86_64-efi", "BOOTX64.EFI"))
-            formats_to_build = [(primary_fmt, primary_file)]
+        iso_efi_dir = self.iso_staging / "EFI" / "BOOT"
+        iso_efi_dir.mkdir(parents=True, exist_ok=True)
 
-        efi_tmp = self.workdir / "tmp_efi"
-        efi_tmp.mkdir(parents=True, exist_ok=True)
+        embedded_cfg = (
+            "insmod iso9660\n"
+            "insmod fat\n"
+            "insmod part_gpt\n"
+            "insmod part_msdos\n"
+            "insmod search\n"
+            "insmod search_fs_file\n"
+            "insmod normal\n"
+            "search --file --set=root /.disk/info\n"
+            "if [ -z \"$root\" ]; then search --file --set=root /live/vmlinuz; fi\n"
+            "if [ -z \"$root\" ]; then search --file --set=root /boot/grub/grub.cfg; fi\n"
+            "if [ -z \"$root\" ]; then set root=cd0; fi\n"
+            "set prefix=($root)/boot/grub\n"
+            "configfile ($root)/boot/grub/grub.cfg\n"
+            "configfile ($root)/EFI/BOOT/grub.cfg\n"
+        )
 
-        created_binaries = []
-        for fmt, boot_filename in formats_to_build:
-            out_binary = efi_tmp / boot_filename
-            built = False
-            if shutil.which("grub-mkstandalone"):
-                grub_cfg = self.iso_staging / "boot" / "grub" / "grub.cfg"
-                res = subprocess.run([
-                    "grub-mkstandalone", f"--format={fmt}",
-                    f"-o={out_binary}", f"boot/grub/grub.cfg={grub_cfg}"
-                ], capture_output=True)
-                if res.returncode == 0 and out_binary.exists():
-                    built = True
+        # Copy EFI modules to /boot/grub/<platform> on ISO staging (exact live-build requirement)
+        search_roots = [
+            self.target_root,
+            self.workdir / "build_host",
+            Path("/")
+        ]
+        for efi_platform in ["x86_64-efi", "i386-efi"]:
+            for r in search_roots:
+                src_efi_dir = r / "usr" / "lib" / "grub" / efi_platform
+                if src_efi_dir.exists():
+                    dst_efi_dir = self.iso_staging / "boot" / "grub" / efi_platform
+                    dst_efi_dir.mkdir(parents=True, exist_ok=True)
+                    for item in src_efi_dir.glob("*"):
+                        if item.is_file() and item.suffix in [".mod", ".lst", ".pf2"]:
+                            shutil.copy2(item, dst_efi_dir / item.name)
+                    # Create the platform-specific grub.cfg that configures root and loads main grub.cfg
+                    (dst_efi_dir / "grub.cfg").write_text(
+                        "insmod efidisk\n"
+                        "search --no-floppy --set=root --file /.disk/info\n"
+                        "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /live/vmlinuz; fi\n"
+                        "set prefix=($root)/boot/grub\n"
+                        "configfile ($root)/boot/grub/grub.cfg\n"
+                    )
+                    break
 
-            if built or out_binary.exists():
-                created_binaries.append((out_binary, boot_filename))
+        for fmt, boot_filename in [("x86_64-efi", "BOOTX64.EFI"), ("i386-efi", "BOOTIA32.EFI")]:
+            mod_dir = None
+            for r in search_roots:
+                candidate = r / "usr" / "lib" / "grub" / fmt
+                if candidate.exists() and (candidate / "modinfo.sh").exists():
+                    mod_dir = candidate
+                    break
 
-        if created_binaries:
-            iso_efi_dir = self.iso_staging / "EFI" / "BOOT"
-            iso_efi_dir.mkdir(parents=True, exist_ok=True)
-            for binary_path, filename in created_binaries:
-                shutil.copy2(binary_path, iso_efi_dir / filename)
+            if not mod_dir:
+                logger.debug(f"GRUB modules for {fmt} not found; skipping {boot_filename}")
+                continue
 
-            subprocess.run(["truncate", "-s", "32M", str(efiboot_img)], check=True)
-            if shutil.which("mformat") and shutil.which("mcopy"):
-                subprocess.run(["mformat", "-i", str(efiboot_img), "-h", "32", "-t", "32", "-n", "64", "-c", "1", "::"], check=True, capture_output=True)
-                subprocess.run(["mmd", "-i", str(efiboot_img), "::/EFI"], capture_output=True)
-                subprocess.run(["mmd", "-i", str(efiboot_img), "::/EFI/BOOT"], capture_output=True)
-                for binary_path, filename in created_binaries:
-                    subprocess.run(["mcopy", "-i", str(efiboot_img), str(binary_path), f"::/EFI/BOOT/{filename}"], check=True, capture_output=True)
+            # Write the embedded early config for this specific platform
+            early_cfg = self.workdir / f"early-efi-grub-{fmt}.cfg"
+            embedded_cfg = (
+                "insmod efidisk\n"
+                "insmod part_gpt\n"
+                "insmod part_msdos\n"
+                "insmod fat\n"
+                "insmod iso9660\n"
+                "insmod search\n"
+                "insmod search_fs_file\n"
+                "insmod search_label\n"
+                "insmod normal\n"
+                "search --no-floppy --set=root --file /.disk/info\n"
+                "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /live/vmlinuz; fi\n"
+                "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /boot/grub/grub.cfg; fi\n"
+                "set prefix=($root)/boot/grub\n"
+                "configfile ($root)/boot/grub/grub.cfg\n"
+            )
+            early_cfg.write_text(embedded_cfg)
 
-        shutil.rmtree(efi_tmp, ignore_errors=True)
+            out_binary = iso_efi_dir / boot_filename
+            self.toolchain.run_tool(
+                "grub-mkstandalone",
+                [
+                    f"--format={fmt}",
+                    "-d", str(mod_dir),
+                    "-o", str(out_binary),
+                    f"boot/grub/grub.cfg={early_cfg}"
+                ],
+                check=False
+            )
+
+        # Write EFI/BOOT/grub.cfg as well for standalone EFI loaders
+        (iso_efi_dir / "grub.cfg").write_text(
+            "search --no-floppy --set=root --file /.disk/info\n"
+            "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /live/vmlinuz; fi\n"
+            "set prefix=($root)/boot/grub\n"
+            "configfile ($root)/boot/grub/grub.cfg\n"
+        )
+
+        # Also copy signed Shim / GRUB binaries if present for Secure Boot compatibility
+        for r in search_roots:
+            shim_candidate = r / "usr" / "lib" / "shim" / "shimx64.efi.signed"
+            grub_candidate = r / "usr" / "lib" / "grub" / "x86_64-efi-signed" / "gcdx64.efi.signed"
+            if shim_candidate.exists() and grub_candidate.exists():
+                shutil.copy2(shim_candidate, iso_efi_dir / "shimx64.efi")
+                shutil.copy2(shim_candidate, iso_efi_dir / "BOOTX64.EFI")
+                shutil.copy2(grub_candidate, iso_efi_dir / "grubx64.efi")
+                break
+
+        efi_files = [f for f in iso_efi_dir.glob("*") if f.is_file()]
+        if efi_files:
+            total_size_mb = max(32, sum(f.stat().st_size for f in efi_files) // (1024 * 1024) + 16)
+            size_kb = total_size_mb * 1024
+
+            if efiboot_img.exists():
+                efiboot_img.unlink()
+
+            mkfs_res = self.toolchain.run_tool("mkfs.vfat", ["-C", str(efiboot_img), str(size_kb)], check=False)
+            if mkfs_res.returncode != 0:
+                self.toolchain.run_tool("truncate", ["-s", f"{total_size_mb}M", str(efiboot_img)], check=True)
+                self.toolchain.run_tool("mformat", ["-i", str(efiboot_img), "-h", "32", "-t", "32", "-n", "64", "-c", "1", "::"], check=False)
+
+            self.toolchain.run_tool("mmd", ["-i", str(efiboot_img), "::/EFI"], check=False)
+            self.toolchain.run_tool("mmd", ["-i", str(efiboot_img), "::/EFI/BOOT"], check=False)
+            for f in efi_files:
+                self.toolchain.run_tool("mcopy", ["-i", str(efiboot_img), str(f), f"::/EFI/BOOT/{f.name}"], check=False)
+
+    def _copy_syslinux_binaries(self):
+        syslinux_paths = [
+            self.target_root / "usr" / "lib" / "ISOLINUX",
+            self.target_root / "usr" / "lib" / "syslinux" / "modules" / "bios",
+            self.target_root / "usr" / "share" / "syslinux",
+            self.target_root / "usr" / "lib" / "syslinux" / "bios",
+            self.target_root / "usr" / "lib" / "syslinux",
+            self.workdir / "build_host" / "usr" / "lib" / "ISOLINUX",
+            self.workdir / "build_host" / "usr" / "lib" / "syslinux" / "modules" / "bios",
+            self.workdir / "build_host" / "usr" / "share" / "syslinux",
+            self.workdir / "build_host" / "usr" / "lib" / "syslinux" / "bios",
+            Path("/usr/lib/ISOLINUX"),
+            Path("/usr/lib/syslinux/modules/bios"),
+            Path("/usr/share/syslinux"),
+            Path("/usr/lib/syslinux/bios"),
+            Path("/usr/lib/syslinux"),
+        ]
+
+        isolinux_target = self.iso_staging / "isolinux"
+
+        sys_files = ["isolinux.bin", "vesamenu.c32", "ldlinux.c32", "libcom32.c32", "libcom.c32", "libutil.c32", "chain.c32", "reboot.c32", "poweroff.c32", "menu.c32"]
+        for sys_file in sys_files:
+            for path in syslinux_paths:
+                src_file = path / sys_file
+                if src_file.exists():
+                    isolinux_target.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src_file, isolinux_target / sys_file)
+                    break
+
+        iso_bin = isolinux_target / "isolinux.bin"
+        if iso_bin.exists() and iso_bin.stat().st_size > 0:
+            iso_label = self._get_iso_label()
+            kernel_params = self._get_kernel_params()
+            syslinux_cfg = (
+                "UI vesamenu.c32\n"
+                "PROMPT 0\n"
+                "TIMEOUT 50\n\n"
+                f"LABEL live\n"
+                f"  MENU LABEL ^{iso_label} Live (Standard)\n"
+                f"  MENU DEFAULT\n"
+                f"  KERNEL /live/vmlinuz\n"
+                f"  APPEND initrd=/live/initrd.img {kernel_params}\n\n"
+                f"LABEL live-toram\n"
+                f"  MENU LABEL {iso_label} Live (^Copy to RAM)\n"
+                f"  KERNEL /live/vmlinuz\n"
+                f"  APPEND initrd=/live/initrd.img {kernel_params} toram\n\n"
+                f"LABEL live-persistence\n"
+                f"  MENU LABEL {iso_label} Live (with ^Persistence)\n"
+                f"  KERNEL /live/vmlinuz\n"
+                f"  APPEND initrd=/live/initrd.img {kernel_params} persistence\n\n"
+                f"LABEL failsafe\n"
+                f"  MENU LABEL {iso_label} Live (^Failsafe Mode)\n"
+                f"  KERNEL /live/vmlinuz\n"
+                f"  APPEND initrd=/live/initrd.img {kernel_params} nomodeset xci586 noapic acpi=off\n"
+            )
+            if self.config.get("with_debian_installer"):
+                syslinux_cfg += (
+                    "\nLABEL install\n"
+                    "  MENU LABEL ^Install (Modo Texto)\n"
+                    "  KERNEL /install/vmlinuz\n"
+                    "  APPEND initrd=/install/initrd.gz vga=788 --- quiet\n\n"
+                    "LABEL install-gtk\n"
+                    "  MENU LABEL ^Graphical Install (Modo Gráfico)\n"
+                    "  KERNEL /install/gtk/vmlinuz\n"
+                    "  APPEND initrd=/install/gtk/initrd.gz video=vesa:ywrap,mtrr vga=788 --- quiet\n\n"
+                    "LABEL install-auto\n"
+                    "  MENU LABEL ^Automated Install (Preseed Server)\n"
+                    "  KERNEL /install/vmlinuz\n"
+                    "  APPEND initrd=/install/initrd.gz auto=true priority=critical preseed/file=/install/preseed.cfg --- quiet\n"
+                )
+
+            (isolinux_target / "isolinux.cfg").write_text(syslinux_cfg)
+        elif isolinux_target.exists():
+            shutil.rmtree(isolinux_target, ignore_errors=True)
 
     def build_iso(self) -> Path:
         self.iso_staging.mkdir(parents=True, exist_ok=True)
@@ -164,16 +459,242 @@ class ISOEngine:
         iso_label = self._get_iso_label()
         kernel_params = self._get_kernel_params()
 
-        with open(self.iso_staging / "boot" / "grub" / "grub.cfg", "w") as f:
-            f.write(
-                f"set default=0\nset timeout=5\n\n"
-                f"menuentry 'Start Live System' {{\n"
-                f"    linux /live/vmlinuz {kernel_params}\n"
-                f"    initrd /live/initrd.img\n"
-                f"}}\n"
+        grub_cfg_text = (
+            "set default=0\n"
+            "set timeout=10\n\n"
+            "insmod gzio\n"
+            "insmod part_gpt\n"
+            "insmod part_msdos\n"
+            "insmod ext2\n"
+            "insmod fat\n"
+            "insmod iso9660\n"
+            "insmod normal\n\n"
+            "search --no-floppy --set=root --file /live/vmlinuz\n\n"
+            f"menuentry '{iso_label} Live (Standard)' {{\n"
+            "    search --no-floppy --set=root --file /live/vmlinuz\n"
+            f"    linux /live/vmlinuz {kernel_params}\n"
+            "    initrd /live/initrd.img\n"
+            "}}\n\n"
+            f"menuentry '{iso_label} Live (Copy to RAM)' {{\n"
+            "    search --no-floppy --set=root --file /live/vmlinuz\n"
+            f"    linux /live/vmlinuz {kernel_params} toram\n"
+            "    initrd /live/initrd.img\n"
+            "}}\n\n"
+            f"menuentry '{iso_label} Live (with Persistence)' {{\n"
+            "    search --no-floppy --set=root --file /live/vmlinuz\n"
+            f"    linux /live/vmlinuz {kernel_params} persistence\n"
+            "    initrd /live/initrd.img\n"
+            "}}\n\n"
+            f"menuentry '{iso_label} Live (Failsafe Mode)' {{\n"
+            "    search --no-floppy --set=root --file /live/vmlinuz\n"
+            f"    linux /live/vmlinuz {kernel_params} nomodeset xci586 noapic acpi=off\n"
+            "    initrd /live/initrd.img\n"
+            "}}\n"
+        )
+
+        if self.config.get("with_debian_installer"):
+            install_dir = self.iso_staging / "install"
+            install_gtk_dir = install_dir / "gtk"
+            install_dir.mkdir(parents=True, exist_ok=True)
+            install_gtk_dir.mkdir(parents=True, exist_ok=True)
+
+            vmlinuz_src = self.iso_staging / "live" / "vmlinuz"
+            initrd_src = self.iso_staging / "live" / "initrd.img"
+
+            if vmlinuz_src.exists():
+                shutil.copy2(vmlinuz_src, install_dir / "vmlinuz")
+                shutil.copy2(vmlinuz_src, install_gtk_dir / "vmlinuz")
+            else:
+                (install_dir / "vmlinuz").touch()
+                (install_gtk_dir / "vmlinuz").touch()
+
+            if initrd_src.exists():
+                shutil.copy2(initrd_src, install_dir / "initrd.gz")
+                shutil.copy2(initrd_src, install_gtk_dir / "initrd.gz")
+            else:
+                (install_dir / "initrd.gz").touch()
+                (install_gtk_dir / "initrd.gz").touch()
+
+            di_custom_dir = resolve_from_project("configs/debian-installer")
+            preseed_files = []
+
+            desktop_profile = self.config.get("desktop")
+            custom_preseed_arg = self.config.get("preseed")
+
+            if custom_preseed_arg:
+                arg_path = Path(custom_preseed_arg)
+                if arg_path.exists():
+                    preseed_files.append(arg_path)
+                elif (di_custom_dir / f"{custom_preseed_arg}.cfg").exists():
+                    preseed_files.append(di_custom_dir / f"{custom_preseed_arg}.cfg")
+                elif (di_custom_dir / f"preseed-{custom_preseed_arg}.cfg").exists():
+                    preseed_files.append(di_custom_dir / f"preseed-{custom_preseed_arg}.cfg")
+                elif (di_custom_dir / custom_preseed_arg).exists():
+                    preseed_files.append(di_custom_dir / custom_preseed_arg)
+            elif desktop_profile and (di_custom_dir / f"preseed-{desktop_profile}.cfg").exists():
+                preseed_files.append(di_custom_dir / f"preseed-{desktop_profile}.cfg")
+            elif not desktop_profile and (di_custom_dir / "preseed-server.cfg").exists():
+                preseed_files.append(di_custom_dir / "preseed-server.cfg")
+            elif di_custom_dir.exists():
+                preseed_files = sorted([f for f in di_custom_dir.glob("*.cfg") if f.is_file()])
+
+            preseed_blocks = []
+            for pf in preseed_files:
+                try:
+                    preseed_blocks.append(f"# --- Preseed: {pf.name} ---\n" + pf.read_text())
+                except Exception as e:
+                    logger.warning(f"Could not read preseed file {pf}: {e}")
+
+            has_preseed = len(preseed_blocks) > 0
+            preseed_content = "\n".join(preseed_blocks) if has_preseed else ""
+
+            if (di_custom_dir / "early_command.sh").exists():
+                shutil.copy2(di_custom_dir / "early_command.sh", install_dir / "early_command.sh")
+                try:
+                    (install_dir / "early_command.sh").chmod(0o755)
+                except Exception:
+                    pass
+                preseed_content += "\nd-i preseed/early_command string /bin/sh /cdrom/install/early_command.sh\n"
+
+            if (di_custom_dir / "late_command.sh").exists():
+                shutil.copy2(di_custom_dir / "late_command.sh", install_dir / "late_command.sh")
+                try:
+                    (install_dir / "late_command.sh").chmod(0o755)
+                except Exception:
+                    pass
+                preseed_content += "\nd-i preseed/late_command string in-target /bin/sh /cdrom/install/late_command.sh\n"
+
+            if (di_custom_dir / "splash.png").exists():
+                shutil.copy2(di_custom_dir / "splash.png", install_gtk_dir / "splash.png")
+                preseed_content += "\nd-i debian-installer/splashpng string /cdrom/install/gtk/splash.png\n"
+
+            custom_files_proj = resolve_from_project("configs/custom_files")
+            if custom_files_proj.exists() and custom_files_proj.is_dir():
+                iso_custom_files = self.iso_staging / "configs" / "custom_files"
+                shutil.copytree(custom_files_proj, iso_custom_files, dirs_exist_ok=True)
+
+            if preseed_content.strip():
+                (install_dir / "preseed.cfg").write_text(preseed_content)
+
+            grub_cfg_text += (
+                "\nmenuentry 'Install (Modo Texto)' {\n"
+                "    linux /install/vmlinuz vga=788 --- quiet\n"
+                "    initrd /install/initrd.gz\n"
+                "}\n\n"
+                "menuentry 'Graphical Install (Modo Gráfico)' {\n"
+                "    linux /install/gtk/vmlinuz video=vesa:ywrap,mtrr vga=788 --- quiet\n"
+                "    initrd /install/gtk/initrd.gz\n"
+                "}\n"
             )
 
-        self.generate_grub_efi_image()
+            if (install_dir / "preseed.cfg").exists():
+                grub_cfg_text += (
+                    "\nmenuentry 'Automated Install (Preseed Server)' {\n"
+                    "    linux /install/vmlinuz auto=true priority=critical preseed/file=/install/preseed.cfg --- quiet\n"
+                    "    initrd /install/initrd.gz\n"
+                    "}\n"
+                )
+
+        di_mode = self.config.get("di_mode", "live")
+        if di_mode == "netboot":
+            logger.info("📡 Generating Debian-Installer PXE/TFTP Network Boot Tree...")
+            tftp_dir = self.iso_staging / "tftpboot" / "debian-installer" / self.arch
+            pxe_cfg_dir = self.iso_staging / "tftpboot" / "pxelinux.cfg"
+            tftp_dir.mkdir(parents=True, exist_ok=True)
+            pxe_cfg_dir.mkdir(parents=True, exist_ok=True)
+
+            install_vmlinuz = self.iso_staging / "install" / "vmlinuz"
+            install_initrd = self.iso_staging / "install" / "initrd.gz"
+
+            if install_vmlinuz.exists():
+                shutil.copy2(install_vmlinuz, tftp_dir / "vmlinuz")
+            else:
+                (tftp_dir / "vmlinuz").touch()
+
+            if install_initrd.exists():
+                shutil.copy2(install_initrd, tftp_dir / "initrd.gz")
+            else:
+                (tftp_dir / "initrd.gz").touch()
+
+            (pxe_cfg_dir / "default").write_text(
+                "DEFAULT install\n"
+                "PROMPT 0\n"
+                "TIMEOUT 50\n\n"
+                "LABEL install\n"
+                f"  KERNEL debian-installer/{self.arch}/vmlinuz\n"
+                f"  APPEND initrd=debian-installer/{self.arch}/initrd.gz vga=788 --- quiet\n"
+            )
+
+            netboot_tar = resolve_from_project(f"output/{self.output_name}-netboot-tftp.tar.gz")
+            netboot_tar.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["tar", "-czf", str(netboot_tar), "-C", str(self.iso_staging / "tftpboot"), "."], check=False)
+            logger.info(f"Successfully generated Netboot TFTP archive: {netboot_tar}")
+
+        # 1. Generate /.disk/info for live-boot media detection BEFORE generating bootloaders
+        disk_dir = self.iso_staging / ".disk"
+        disk_dir.mkdir(parents=True, exist_ok=True)
+        (disk_dir / "info").write_text(f"{iso_label} {self.arch}\n")
+        (disk_dir / "release_notes_url").write_text("https://debian.org\n")
+
+        for d in [
+            self.iso_staging / "boot" / "grub",
+            self.iso_staging / "boot" / "grub2",
+            self.iso_staging / "EFI" / "BOOT",
+        ]:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "grub.cfg").write_text(grub_cfg_text)
+
+        (self.iso_staging / "boot" / "grub" / "loopback.cfg").write_text(grub_cfg_text)
+
+        for platform_dir in [self.iso_staging / "boot" / "grub" / "x86_64-efi", self.iso_staging / "boot" / "grub" / "i386-efi"]:
+            platform_dir.mkdir(parents=True, exist_ok=True)
+            (platform_dir / "grub.cfg").write_text(
+                "insmod efidisk\n"
+                "search --no-floppy --set=root --file /.disk/info\n"
+                "if [ -z \"$root\" ]; then search --no-floppy --set=root --file /live/vmlinuz; fi\n"
+                "set prefix=($root)/boot/grub\n"
+                "configfile ($root)/boot/grub/grub.cfg\n"
+            )
+
+        if self.should_use_syslinux():
+            self._copy_syslinux_binaries()
+        if self.should_use_grub_bios():
+            bios_core = self.generate_grub_bios_core()
+        if self.should_use_grub_efi():
+            self.generate_grub_efi_image()
+
+        # 2. Generate live/filesystem.packages for Calamares installer (live-build standard)
+        try:
+            dpkg_status = self.target_root / "var" / "lib" / "dpkg" / "status"
+            if dpkg_status.exists():
+                pkgs = []
+                curr_pkg = None
+                curr_ver = None
+                for line in dpkg_status.read_text().splitlines():
+                    if line.startswith("Package: "):
+                        curr_pkg = line.split(": ", 1)[1].strip()
+                    elif line.startswith("Version: "):
+                        curr_ver = line.split(": ", 1)[1].strip()
+                    elif line == "" and curr_pkg and curr_ver:
+                        pkgs.append(f"{curr_pkg}\t{curr_ver}")
+                        curr_pkg, curr_ver = None, None
+                if pkgs:
+                    (self.iso_staging / "live" / "filesystem.packages").write_text("\n".join(pkgs) + "\n")
+        except Exception as e:
+            logger.warning(f"Could not write filesystem.packages manifest: {e}")
+
+        # 3. Generate md5sum.txt inside ISO root (live-build binary_checksums standard)
+        try:
+            md5_lines = []
+            for p in sorted(self.iso_staging.rglob("*")):
+                if p.is_file() and p.name != "md5sum.txt" and not str(p.relative_to(self.iso_staging)).startswith("isolinux"):
+                    rel = p.relative_to(self.iso_staging)
+                    h = hashlib.md5(p.read_bytes()).hexdigest()
+                    md5_lines.append(f"{h}  ./{rel}")
+            if md5_lines:
+                (self.iso_staging / "md5sum.txt").write_text("\n".join(md5_lines) + "\n")
+        except Exception as e:
+            logger.warning(f"Could not write ISO md5sum.txt: {e}")
 
         iso_path = resolve_from_project(f"output/{self.output_name}.iso")
         iso_path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,23 +702,79 @@ class ISOEngine:
         if self.mode == "mock":
             iso_path.touch()
         else:
-            self.toolchain.run_tool(
-                "xorriso",
-                [
-                    "-as", "mkisofs",
-                    "-V", iso_label,
-                    "-rock", "-joliet",
-                    "-eltorito-boot", "isolinux/isolinux.bin",
-                    "-eltorito-catalog", "isolinux/boot.cat",
+            search_roots = [
+                self.target_root,
+                self.workdir / "build_host",
+                Path("/")
+            ]
+
+            mbr_isohdpfx = None
+            mbr_grub = None
+            for r in search_roots:
+                for candidate in [
+                    r / "usr" / "lib" / "ISOLINUX" / "isohdpfx.bin",
+                    r / "usr" / "lib" / "syslinux" / "isohdpfx.bin",
+                    r / "usr" / "lib" / "syslinux" / "modules" / "bios" / "isohdpfx.bin",
+                ]:
+                    if candidate.exists() and candidate.stat().st_size > 0:
+                        mbr_isohdpfx = candidate
+                        break
+                for candidate in [
+                    r / "usr" / "lib" / "grub" / "i386-pc" / "boot_hybrid.img",
+                    r / "usr" / "lib" / "grub2" / "i386-pc" / "boot_hybrid.img",
+                ]:
+                    if candidate.exists() and candidate.stat().st_size > 0:
+                        mbr_grub = candidate
+                        break
+
+            xorriso_args = [
+                "-as", "mkisofs",
+                "-V", iso_label,
+                "-r", "-J", "-joliet-long", "-cache-inodes",
+            ]
+
+            isolinux_bin = self.iso_staging / "isolinux" / "isolinux.bin"
+            grub_eltorito = self.iso_staging / "boot" / "grub" / "grub_eltorito"
+            efiboot_img = self.iso_staging / "boot" / "grub" / "efiboot.img"
+
+            if self.should_use_syslinux() and isolinux_bin.exists() and isolinux_bin.stat().st_size > 0:
+                if mbr_isohdpfx:
+                    xorriso_args.extend(["-isohybrid-mbr", str(mbr_isohdpfx), "-partition_offset", "16"])
+                elif mbr_grub:
+                    xorriso_args.extend(["-isohybrid-mbr", str(mbr_grub)])
+
+                xorriso_args.extend([
+                    "-b", "isolinux/isolinux.bin",
+                    "-c", "isolinux/boot.cat",
                     "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table",
+                ])
+            elif self.should_use_grub_bios() and grub_eltorito.exists() and grub_eltorito.stat().st_size > 0:
+                if mbr_grub:
+                    xorriso_args.extend(["--grub2-boot-info", "--grub2-mbr", str(mbr_grub)])
+                elif mbr_isohdpfx:
+                    xorriso_args.extend(["-isohybrid-mbr", str(mbr_isohdpfx)])
+
+                xorriso_args.extend([
+                    "-b", "boot/grub/grub_eltorito",
+                    "-no-emul-boot", "-boot-load-size", "4", "-boot-info-table",
+                ])
+
+            if self.should_use_grub_efi() and efiboot_img.exists() and efiboot_img.stat().st_size > 0:
+                xorriso_args.extend([
                     "-eltorito-alt-boot",
                     "-e", "boot/grub/efiboot.img",
-                    "-no-emul-boot", "-isohybrid-gpt-basdat",
-                    "-o", str(iso_path),
-                    str(self.iso_staging),
-                ],
-                check=False
-            )
+                    "-no-emul-boot",
+                    "-isohybrid-gpt-basdat",
+                    "-append_partition", "2", "0xef", str(efiboot_img)
+                ])
+
+            xorriso_args.extend([
+                "-o", str(iso_path),
+                str(self.iso_staging)
+            ])
+
+            logger.info("Executing xorriso to create live-build compliant ISO: %s", " ".join(xorriso_args))
+            self.toolchain.run_tool("xorriso", xorriso_args, check=False)
 
         return iso_path
 
@@ -207,5 +784,10 @@ class ISOEngine:
         if self.mode == "mock":
             tar_path.touch()
         else:
-            subprocess.run(["tar", "cJpf", str(tar_path), "-C", str(self.target_root), "."], check=True)
+            subprocess.run([
+                "tar", "cJpf", str(tar_path),
+                "--exclude=./proc/*", "--exclude=./sys/*", "--exclude=./dev/*",
+                "--exclude=./tmp/*", "--exclude=./run/*",
+                "-C", str(self.target_root), "."
+            ], check=True)
         return tar_path

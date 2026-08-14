@@ -3,6 +3,14 @@
   "display_manager": "sddm",
   "packages": [
     "kde-plasma-desktop",
-    "sddm"
+    "plasma-workspace",
+    "sddm",
+    "xserver-xorg",
+    "xserver-xorg-video-all",
+    "xserver-xorg-video-vmware",
+    "xserver-xorg-input-all",
+    "x11-xserver-utils",
+    "dbus-x11",
+    "desktop-base"
   ]
 }
