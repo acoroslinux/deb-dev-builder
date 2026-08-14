@@ -203,7 +203,7 @@ class ISOEngine:
                     "-o", str(core_tmp),
                     "-O", "i386-pc",
                     "--prefix=/boot/grub",
-                    "biosdisk", "iso9660", "search", "search_fs_file", "search_label", "configfile", "normal", "linux", "gzio", "part_gpt", "part_msdos", "fat", "ext2"
+                    "biosdisk", "iso9660", "search", "search_fs_file", "search_label", "configfile", "normal", "linux", "gzio", "part_gpt", "part_msdos", "fat", "ext2", "test", "echo", "loadenv", "all_video", "gfxterm", "font", "gettext", "png", "terminal"
                 ],
                 check=False
             )
@@ -535,19 +535,19 @@ class ISOEngine:
             f"menuentry \"{iso_label} Live (Standard)\" --hotkey=l {{\n"
             f"    linux /live/vmlinuz {kernel_params}\n"
             "    initrd /live/initrd.img\n"
-            "}}\n\n"
+            "}\n\n"
             f"menuentry \"{iso_label} Live (Copy to RAM)\" --hotkey=r {{\n"
             f"    linux /live/vmlinuz {kernel_params} toram\n"
             "    initrd /live/initrd.img\n"
-            "}}\n\n"
+            "}\n\n"
             f"menuentry \"{iso_label} Live (with Persistence)\" --hotkey=p {{\n"
             f"    linux /live/vmlinuz {kernel_params} persistence\n"
             "    initrd /live/initrd.img\n"
-            "}}\n\n"
+            "}\n\n"
             f"menuentry \"{iso_label} Live (Failsafe Mode)\" --hotkey=f {{\n"
             f"    linux /live/vmlinuz {kernel_params} nomodeset xci586 noapic acpi=off\n"
             "    initrd /live/initrd.img\n"
-            "}}\n"
+            "}\n"
         )
 
         if self.config.get("with_debian_installer"):
