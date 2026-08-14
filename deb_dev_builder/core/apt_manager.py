@@ -54,33 +54,50 @@ class APTManager:
                 pass
             return
 
-        base_distro = self.config.get("base_distro", "debian").lower()
-        if base_distro == "devuan":
-            default_mirror = "http://deb.devuan.org/merged"
-            default_suite = "daedalus"
-        else:
-            default_mirror = "http://deb.debian.org/debian"
-            default_suite = "bookworm"
-
-        mirror = self.config.get("mirror", default_mirror)
-        suite = self.config.get("suite", default_suite)
+        # Read configuration directly from the loaded distro profile
+        mirror = self.config.get("mirror", "http://deb.debian.org/debian")
+        suite = self.config.get("suite", "bookworm")
         components = self.config.get("components", ["main", "contrib", "non-free-firmware"])
         comp_str = " ".join(components)
 
-        sources_content = f"deb {mirror} {suite} {comp_str}\n"
-        if base_distro == "debian":
-            if "security_mirror" in self.config:
-                sec_mirror = self.config["security_mirror"]
-                sources_content += f"deb {sec_mirror} {suite}-security {comp_str}\n"
-            else:
-                sources_content += f"deb http://security.debian.org/debian-security {suite}-security {comp_str}\n"
+        sources_lines = [
+            f"# Primary repository",
+            f"deb {mirror} {suite} {comp_str}",
+        ]
 
-            if "updates_mirror" in self.config:
-                up_mirror = self.config["updates_mirror"]
-                sources_content += f"deb {up_mirror} {suite}-updates {comp_str}\n"
-            else:
-                sources_content += f"deb {mirror} {suite}-updates {comp_str}\n"
+        # Security updates repository (if configured for this distro profile)
+        if self.config.get("security_mirror"):
+            sec_mirror = self.config["security_mirror"]
+            sec_suite = self.config.get("security_suite", f"{suite}-security")
+            sources_lines.append(f"deb {sec_mirror} {sec_suite} {comp_str}")
 
+        # Updates / Proposed repository (if configured for this distro profile)
+        if self.config.get("updates_mirror"):
+            up_mirror = self.config["updates_mirror"]
+            up_suite = self.config.get("updates_suite", f"{suite}-updates")
+            sources_lines.append(f"deb {up_mirror} {up_suite} {comp_str}")
+
+        # Backports repository (if configured for this distro profile)
+        if self.config.get("backports_mirror"):
+            bp_mirror = self.config["backports_mirror"]
+            bp_suite = self.config.get("backports_suite", f"{suite}-backports")
+            sources_lines.append(f"deb {bp_mirror} {bp_suite} {comp_str}")
+
+        # Extra / third-party repositories
+        extra_repos = self.config.get("extra_repos", [])
+        if extra_repos:
+            sources_lines.append("")
+            sources_lines.append("# Extra repositories")
+            for repo in extra_repos:
+                if isinstance(repo, str):
+                    sources_lines.append(repo)
+                elif isinstance(repo, dict):
+                    repo_url = repo.get("url", "")
+                    repo_suite = repo.get("suite", suite)
+                    repo_comps = " ".join(repo.get("components", components))
+                    sources_lines.append(f"deb {repo_url} {repo_suite} {repo_comps}")
+
+        sources_content = "\n".join(sources_lines) + "\n"
         with open(sources_dir / "sources.list", "w") as f:
             f.write(sources_content)
 
@@ -123,13 +140,8 @@ class APTManager:
             else:
                 logger.warning("Local seed tarball extraction failed. Falling back to network bootstrap.")
 
-        base_distro = self.config.get("base_distro", "debian").lower()
-        if base_distro == "devuan":
-            default_mirror = "http://deb.devuan.org/merged"
-        else:
-            default_mirror = "http://deb.debian.org/debian"
-
-        mirror = self.config.get("mirror", default_mirror)
+        mirror = self.config.get("mirror", "http://deb.debian.org/debian")
+        suite = self.config.get("suite", suite)
         components = ",".join(self.config.get("components", ["main", "contrib", "non-free-firmware"]))
 
         dev_dir = self.target_root / "dev"
