@@ -860,7 +860,6 @@ class ISOEngine:
                 "-V", iso_label,
                 "-r", "-J", "-joliet-long", "-cache-inodes",
                 "-pad",
-                "-padding", "300k",
             ]
 
             isolinux_bin = self.iso_staging / "isolinux" / "isolinux.bin"
