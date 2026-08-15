@@ -265,3 +265,70 @@ class APTManager:
         if self.chroot.mode == "mock":
             return
         self.sync_cache_from_target()
+
+    def download_offline_packages(self, packages: List[str], dest_dir: Path) -> Path:
+        """
+        Downloads the specified packages (and dependencies) into dest_dir and creates Packages.gz index.
+        """
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        if self.chroot.mode == "mock":
+            (dest_dir / "Packages.gz").touch()
+            (dest_dir / "Release").touch()
+            return dest_dir
+
+        real_pkgs = [p for p in packages if p]
+        if real_pkgs:
+            logger.info(f"📦 Downloading {len(real_pkgs)} offline packages into {dest_dir}...")
+            cmd = ["apt-get", "install", "-y", "--download-only", "-o", f"Dir::Cache::Archives={dest_dir}"] + real_pkgs
+            self.chroot.run_in_chroot(cmd, check=False, env={"DEBIAN_FRONTEND": "noninteractive"})
+
+            # Copy any packages from target archive cache
+            target_archives = self.target_root / "var" / "cache" / "apt" / "archives"
+            if target_archives.exists():
+                for deb in target_archives.glob("*.deb"):
+                    try:
+                        dst = dest_dir / deb.name
+                        if not dst.exists():
+                            shutil.copy2(deb, dst)
+                    except Exception:
+                        pass
+
+        self.create_repository_metadata(dest_dir)
+        return dest_dir
+
+    def create_repository_metadata(self, repo_dir: Path):
+        import gzip
+        repo_dir = Path(repo_dir)
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        if self.chroot.mode == "mock":
+            (repo_dir / "Packages.gz").touch()
+            (repo_dir / "Release").touch()
+            return
+
+        packages_file = repo_dir / "Packages"
+        if shutil.which("dpkg-scanpackages"):
+            res = subprocess.run(["dpkg-scanpackages", ".", "/dev/null"], cwd=str(repo_dir), capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                packages_file.write_text(res.stdout)
+        elif shutil.which("apt-ftparchive"):
+            res = subprocess.run(["apt-ftparchive", "packages", "."], cwd=str(repo_dir), capture_output=True, text=True, check=False)
+            if res.returncode == 0:
+                packages_file.write_text(res.stdout)
+
+        if packages_file.exists():
+            with open(packages_file, "rb") as f_in, gzip.open(repo_dir / "Packages.gz", "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        else:
+            (repo_dir / "Packages.gz").touch()
+
+        release_file = repo_dir / "Release"
+        release_content = (
+            "Archive: stable\n"
+            "Component: main\n"
+            "Origin: Offline-ISO\n"
+            "Label: Offline ISO Repository\n"
+            "Architecture: amd64\n"
+        )
+        release_file.write_text(release_content)
+

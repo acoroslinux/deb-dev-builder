@@ -84,3 +84,15 @@ class TestAPTManager:
         assert "bookworm-backports" in sources
         assert "deb http://packages.custom.org/repo bookworm main" in sources
         assert "deb http://fasttrack.debian.net/debian bookworm-fasttrack main" in sources
+
+    def test_download_offline_packages_creates_packages_gz(self, tmp_path):
+        target_root = tmp_path / "chroot"
+        chroot = ChrootManager(target_root, mode="mock", arch="amd64")
+        apt = APTManager(chroot, config={})
+        dest_dir = tmp_path / "offline_repo"
+
+        result = apt.download_offline_packages(["gparted", "git"], dest_dir)
+        assert result.exists()
+        assert (dest_dir / "Packages.gz").exists()
+        assert (dest_dir / "Release").exists()
+

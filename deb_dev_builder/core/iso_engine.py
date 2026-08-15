@@ -855,6 +855,13 @@ class ISOEngine:
                         mbr_grub = candidate
                         break
 
+            # Copy offline repository into ISO staging if available
+            offline_repo_dir = self.config.get("offline_repo_dir")
+            if offline_repo_dir and Path(offline_repo_dir).exists():
+                target_repo = self.iso_staging / "repo"
+                target_repo.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(offline_repo_dir, target_repo, dirs_exist_ok=True, symlinks=True, ignore_dangling_symlinks=True)
+
             xorriso_args = [
                 "-as", "mkisofs",
                 "-V", iso_label,

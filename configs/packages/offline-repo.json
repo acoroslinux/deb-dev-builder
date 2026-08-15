@@ -1,0 +1,16 @@
+{
+  "offline_repo_packages": [
+    "gparted",
+    "testdisk",
+    "ddrescue",
+    "mc",
+    "iotop",
+    "nmap",
+    "git",
+    "neovim",
+    "rsync",
+    "p7zip-full",
+    "curl",
+    "wget"
+  ]
+}

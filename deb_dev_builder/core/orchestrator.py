@@ -47,6 +47,8 @@ class BuildOrchestrator:
         multimedia_codecs: bool = False,
         with_flathub: bool = False,
         with_zram: bool = False,
+        with_offline_repo: bool = False,
+        offline_repo_packages: Optional[List[str]] = None,
         force_isolated_toolchain: bool = False,
     ):
         self.arch = arch
@@ -74,10 +76,14 @@ class BuildOrchestrator:
         self.multimedia_codecs = multimedia_codecs
         self.with_flathub = with_flathub
         self.with_zram = with_zram
+        self.with_offline_repo = with_offline_repo
+        self.offline_repo_packages = offline_repo_packages or []
         self.force_isolated_toolchain = force_isolated_toolchain
 
         if self.multimedia_codecs and "multimedia" not in self.package_profiles:
             self.package_profiles.append("multimedia")
+        if self.with_offline_repo and "offline-repo" not in self.package_profiles:
+            self.package_profiles.append("offline-repo")
 
         self.workdir = resolve_from_project(f"workdir/{self.arch}")
         self.target_root = self.workdir / "chroot"
@@ -162,6 +168,19 @@ class BuildOrchestrator:
 
             pkgs = self.config.get("packages", [])
             apt.install_packages(pkgs)
+
+            # Prepare offline package repository if requested
+            offline_pkgs = list(self.config.get("offline_repo_packages", []))
+            if self.offline_repo_packages:
+                for p in self.offline_repo_packages:
+                    if p not in offline_pkgs:
+                        offline_pkgs.append(p)
+
+            if (self.with_offline_repo or offline_pkgs) and self.output_format == "iso":
+                offline_repo_dir = self.workdir / "offline_repo"
+                apt.download_offline_packages(offline_pkgs, offline_repo_dir)
+                self.config["offline_repo_dir"] = str(offline_repo_dir)
+                self.config["with_offline_repo"] = True
 
             customizer = SystemCustomizer(chroot, self.config)
             customizer.configure_live_environment()
