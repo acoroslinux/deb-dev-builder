@@ -912,6 +912,14 @@ class ISOEngine:
             logger.info("Executing xorriso to create live-build compliant ISO: %s", " ".join(xorriso_args))
             self.toolchain.run_tool("xorriso", xorriso_args, check=False)
 
+            # Pad ISO with 2MB of zero sectors to prevent ATAPI/IDE CD-ROM readahead timeouts (sr0 / ata2.00)
+            try:
+                if iso_path.exists():
+                    with open(iso_path, "ab") as f:
+                        f.write(b"\x00" * (2 * 1024 * 1024))
+            except Exception as e:
+                logger.warning("Could not append zero padding to ISO: %s", e)
+
         return iso_path
 
     def build_tarball(self) -> Path:
