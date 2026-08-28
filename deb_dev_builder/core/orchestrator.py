@@ -231,6 +231,7 @@ class BuildOrchestrator:
             apt.update_apt_cache()
 
             pkgs = self.config.get("packages", [])
+            if "zram-tools" not in pkgs: pkgs.append("zram-tools")
             apt.install_packages(pkgs)
 
             # Prepare offline package repository if requested

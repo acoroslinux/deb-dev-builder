@@ -246,6 +246,14 @@ class APTManager:
         self.chroot.run_in_chroot(["apt-get", "update", "-y"], env={"DEBIAN_FRONTEND": "noninteractive"})
 
     def install_packages(self, packages: List[str]):
+
+        # Optimize apt for speed
+        if self.chroot.mode == 'real':
+            apt_conf_dir = self.chroot.target_root / "etc" / "apt" / "apt.conf.d"
+            apt_conf_dir.mkdir(parents=True, exist_ok=True)
+            optimize_conf = apt_conf_dir / "99optimize"
+            optimize_conf.write_text('Acquire::http::Pipeline-Depth "10";\nAcquire::Languages "none";\n')
+
         if not packages or self.chroot.mode == "mock":
             return
         real_pkgs = [p for p in packages if p]

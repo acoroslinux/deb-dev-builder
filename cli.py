@@ -72,6 +72,7 @@ def main():
         "architecture",
         nargs="?",
         default="amd64",
+        choices=["x86_64", "aarch64", "riscv64", "ppc64le", "s390x"],
         help="Target architecture (amd64, i386, aarch64, armhf, riscv64). Default: amd64",
     )
 
@@ -166,7 +167,7 @@ def main():
     parser.add_argument(
         "-f",
         "--format",
-        choices=["iso", "img", "raw", "qcow2", "vmdk", "vhd", "vdi", "tarball", "container"],
+        choices=["iso", "img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi", "tarball", "container"],
         default="iso",
         help="Output artifact format: iso, img, qcow2, vmdk, vhd, vdi, tarball, container. Default: iso",
     )
@@ -309,6 +310,14 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Map architectures to Debian style
+    if hasattr(args, 'architecture'):
+        if args.architecture == 'x86_64':
+            args.architecture = 'amd64'
+        elif args.architecture == 'aarch64':
+            args.architecture = 'arm64'
+
 
     config_root = resolve_from_project("configs")
     if args.list_options:
