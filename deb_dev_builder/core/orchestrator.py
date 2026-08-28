@@ -134,6 +134,8 @@ class BuildOrchestrator:
             if selected_bootloader == "systemd-boot":
                 essential_boot_pkgs.append("systemd-boot")
             if self.fs_type == "btrfs":
+            elif self.fs_type == "f2fs":
+                essential_boot_pkgs.append("f2fs-tools")
                 essential_boot_pkgs.append("btrfs-progs")
             elif self.fs_type == "xfs":
                 essential_boot_pkgs.append("xfsprogs")
