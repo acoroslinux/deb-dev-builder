@@ -38,6 +38,8 @@ class BuildOrchestrator:
         output_format: str = "iso",
         mode: str = "mock",
         clean: bool = True,
+        fast_mode: bool = False,
+        use_tmpfs: bool = False,
         generate_manifest: bool = True,
         with_calamares: bool = False,
         with_debian_installer: bool = False,
@@ -68,6 +70,8 @@ class BuildOrchestrator:
         self.output_format = output_format.lower()
         self.mode = mode.lower()
         self.clean = clean
+        self.fast_mode = fast_mode
+        self.use_tmpfs = use_tmpfs
         self.generate_manifest = generate_manifest
         self.with_calamares = with_calamares
         self.with_debian_installer = with_debian_installer
@@ -162,6 +166,48 @@ class BuildOrchestrator:
                 import shutil
                 shutil.rmtree(self.workdir, ignore_errors=True)
 
+        if getattr(self, "use_tmpfs", False):
+            if getattr(self, "mode", "real") == "real" and __import__("os").geteuid() == 0:
+                tmpfs_size = "16G"
+                try:
+                    total_kb = 0
+                    with open("/proc/meminfo", "r") as f:
+                        for line in f:
+                            if line.startswith("MemTotal:") or line.startswith("SwapTotal:"):
+                                total_kb += int(line.split()[1])
+                    total_gb = total_kb / (1024 * 1024)
+                    safe_gb = max(4, min(16, int(total_gb * 0.75)))
+                    tmpfs_size = f"{safe_gb}G"
+                except Exception:
+                    pass
+
+                try:
+                    resolved_workdir = str(self.workdir.resolve())
+                    with open("/proc/mounts", "r") as f:
+                        if any(len(line.split()) >= 2 and line.split()[1] == resolved_workdir for line in f):
+                            import subprocess
+                            subprocess.run(["umount", "-f", resolved_workdir], check=False)
+                except Exception:
+                    pass
+
+                print(f"[ORCHESTRATOR] 🚀 Mounting tmpfs ({tmpfs_size} RAM disk) on {self.workdir}...")
+                self.workdir.mkdir(parents=True, exist_ok=True)
+                import subprocess
+                subprocess.run(["mount", "-t", "tmpfs", "-o", f"size={tmpfs_size},mode=0755", "tmpfs", str(self.workdir)], check=True)
+                self._tmpfs_mounted = True
+            else:
+                print(f"[ORCHESTRATOR] 🚀 [MOCK/SIM] Fast RAM staging enabled for {self.workdir}")
+
+
+        if not hasattr(self, "config"):
+            self.config = {}
+        if hasattr(self.config, "_data"):
+            self.config._data["fast_mode"] = self.fast_mode
+            self.config._data["use_tmpfs"] = self.use_tmpfs
+        elif isinstance(self.config, dict):
+            self.config["fast_mode"] = self.fast_mode
+            self.config["use_tmpfs"] = self.use_tmpfs
+
         toolchain = ToolchainManager(
             workdir_base=self.workdir,
             mode=self.mode,
@@ -231,6 +277,39 @@ class BuildOrchestrator:
                 if hasattr(self, 'workdir') and self.workdir and self.workdir.exists():
                     import shutil
                     shutil.rmtree(self.workdir, ignore_errors=True)
+
+        if getattr(self, "use_tmpfs", False):
+            if getattr(self, "mode", "real") == "real" and __import__("os").geteuid() == 0:
+                tmpfs_size = "16G"
+                try:
+                    total_kb = 0
+                    with open("/proc/meminfo", "r") as f:
+                        for line in f:
+                            if line.startswith("MemTotal:") or line.startswith("SwapTotal:"):
+                                total_kb += int(line.split()[1])
+                    total_gb = total_kb / (1024 * 1024)
+                    safe_gb = max(4, min(16, int(total_gb * 0.75)))
+                    tmpfs_size = f"{safe_gb}G"
+                except Exception:
+                    pass
+
+                try:
+                    resolved_workdir = str(self.workdir.resolve())
+                    with open("/proc/mounts", "r") as f:
+                        if any(len(line.split()) >= 2 and line.split()[1] == resolved_workdir for line in f):
+                            import subprocess
+                            subprocess.run(["umount", "-f", resolved_workdir], check=False)
+                except Exception:
+                    pass
+
+                print(f"[ORCHESTRATOR] 🚀 Mounting tmpfs ({tmpfs_size} RAM disk) on {self.workdir}...")
+                self.workdir.mkdir(parents=True, exist_ok=True)
+                import subprocess
+                subprocess.run(["mount", "-t", "tmpfs", "-o", f"size={tmpfs_size},mode=0755", "tmpfs", str(self.workdir)], check=True)
+                self._tmpfs_mounted = True
+            else:
+                print(f"[ORCHESTRATOR] 🚀 [MOCK/SIM] Fast RAM staging enabled for {self.workdir}")
+
 
             try:
                 chroot.umount_virtual_fs()

@@ -204,7 +204,8 @@ menuentry "Debian Linux" {{
             cmd = ["gzip", "-9", str(out_path)]
             final_path = Path(f"{out_path}.gz")
         else: # zstd
-            cmd = ["zstd", "-19", "-f", "-T0", "-q", "--rm", str(out_path)]
+            zstd_level = "-3" if self.config.get("fast_mode", False) else "-19"
+                cmd = ["zstd", zstd_level, "-f", "-T0", "-q", "--rm", str(out_path)]
             final_path = Path(f"{out_path}.zst")
             
         if self.toolchain:

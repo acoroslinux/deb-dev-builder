@@ -293,6 +293,21 @@ def main():
         help="Validate build configuration without performing full build.",
     )
 
+    
+    parser.add_argument(
+        "--fast",
+        "--quick",
+        dest="fast_mode",
+        action="store_true",
+        help="Enable ultra-fast build mode (multi-threaded zstd level 3, fast block sizes, and optimized staging).",
+    )
+
+    parser.add_argument(
+        "--tmpfs",
+        action="store_true",
+        help="Mount working directory as tmpfs in RAM for extreme build speed.",
+    )
+
     args = parser.parse_args()
 
     config_root = resolve_from_project("configs")
@@ -349,7 +364,8 @@ def main():
             with_offline_repo=args.with_offline_repo,
             offline_repo_packages=parsed_offline_packages,
             force_isolated_toolchain=args.force_isolated_toolchain,
-        )
+        fast_mode=getattr(args, "fast_mode", False),
+        use_tmpfs=getattr(args, "tmpfs", False),)
     except (ConfigLoaderError, BuildOrchestratorError) as exc:
         print(f"❌ Error: {exc}", file=sys.stderr)
         sys.exit(1)
