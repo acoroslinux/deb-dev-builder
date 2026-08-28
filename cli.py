@@ -153,6 +153,7 @@ def main():
         default="grub2-hybrid",
         help="Bootloader profile (grub2-hybrid, grub2-uefi, grub2-bios, syslinux). Default: grub2-hybrid",
     )
+    parser.add_argument("--fs-type", type=str, default="ext4", choices=["ext4", "btrfs", "xfs"], help="Root filesystem type (ext4, btrfs, xfs). Default: ext4")
 
     parser.add_argument(
         "-p",
@@ -331,6 +332,7 @@ def main():
             init_system=args.init_system,
             desktop=args.desktop,
             kernel=args.kernel,
+            fs_type=args.fs_type,
             bootloader=args.bootloader,
             variant=args.variant,
             package_profiles=parsed_package_profiles,

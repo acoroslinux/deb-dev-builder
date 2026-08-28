@@ -29,6 +29,7 @@ class BuildOrchestrator:
         desktop: Optional[str] = None,
         kernel: Optional[str] = None,
         bootloader: Optional[str] = None,
+        fs_type: str = "ext4",
         variant: Optional[str] = None,
         package_profiles: Optional[List[str]] = None,
         service_profiles: Optional[List[str]] = None,
@@ -58,6 +59,7 @@ class BuildOrchestrator:
         self.desktop = desktop
         self.kernel = kernel
         self.bootloader = bootloader
+        self.fs_type = fs_type
         self.variant = variant
         self.package_profiles = package_profiles or []
         self.service_profiles = service_profiles or []
@@ -107,6 +109,7 @@ class BuildOrchestrator:
         selected_bootloader = self.bootloader or self.config.get("bootloader", {}).get("type") or "grub2-hybrid"
         self.config["bootloader"] = {"type": selected_bootloader}
         self.config["bootloader_type"] = selected_bootloader
+        self.config["fs_type"] = self.fs_type
         self.config["with_calamares"] = self.with_calamares
         self.config["with_debian_installer"] = self.with_debian_installer
         self.config["preseed"] = self.preseed
@@ -114,11 +117,22 @@ class BuildOrchestrator:
         self.config["with_flathub"] = self.with_flathub
         self.config["with_zram"] = self.with_zram
 
-        essential_boot_pkgs = [
-            "live-boot", "live-config", "live-config-systemd", "systemd-sysv",
-            "grub-pc-bin", "grub-efi-amd64-bin", "grub-efi-ia32-bin", "shim-signed",
-            "isolinux", "syslinux-common", "dosfstools", "mtools", "efibootmgr"
-        ]
+        if self.output_format == "iso":
+            essential_boot_pkgs = [
+                "live-boot", "live-config", "live-config-systemd", "systemd-sysv",
+                "grub-pc-bin", "grub-efi-amd64-bin", "grub-efi-ia32-bin", "shim-signed",
+                "isolinux", "syslinux-common", "dosfstools", "mtools", "efibootmgr"
+            ]
+        else:
+            essential_boot_pkgs = [
+                "systemd-sysv", "dosfstools", "mtools", "efibootmgr", "initramfs-tools"
+            ]
+            if selected_bootloader == "systemd-boot":
+                essential_boot_pkgs.append("systemd-boot")
+            if self.fs_type == "btrfs":
+                essential_boot_pkgs.append("btrfs-progs")
+            elif self.fs_type == "xfs":
+                essential_boot_pkgs.append("xfsprogs")
         for pkg in essential_boot_pkgs:
             if pkg not in self.config.get("packages", []):
                 self.config.setdefault("packages", []).append(pkg)
@@ -140,10 +154,12 @@ class BuildOrchestrator:
 
     def build(self, output_name: Optional[str] = None) -> Path:
         name = output_name or f"deb-dev-{self.distro}-{self.arch}"
+
         if self.clean and self.mode != "mock":
             if os.geteuid() == 0:
                 unmount_all_under(resolve_from_project("workdir"))
             if self.workdir.exists():
+                import shutil
                 shutil.rmtree(self.workdir, ignore_errors=True)
 
         toolchain = ToolchainManager(
@@ -191,7 +207,7 @@ class BuildOrchestrator:
             disk_formats = {"img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi"}
 
             if self.output_format in disk_formats:
-                disk_engine = DiskEngine(self.workdir, self.target_root, name, self.config, self.mode)
+                disk_engine = DiskEngine(self.workdir, self.target_root, name, self.config, self.mode, toolchain=toolchain)
                 artifact = disk_engine.build_disk_image(target_format=self.output_format)
             elif self.output_format in {"container", "oci"}:
                 container_engine = ContainerEngine(self.target_root, name, self.config, self.mode)
@@ -209,6 +225,13 @@ class BuildOrchestrator:
 
             return artifact
         finally:
+            if self.clean and self.mode != "mock":
+                if os.geteuid() == 0:
+                    unmount_all_under(resolve_from_project("workdir"))
+                if hasattr(self, 'workdir') and self.workdir and self.workdir.exists():
+                    import shutil
+                    shutil.rmtree(self.workdir, ignore_errors=True)
+
             try:
                 chroot.umount_virtual_fs()
             except Exception:

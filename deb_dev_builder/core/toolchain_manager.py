@@ -80,7 +80,7 @@ class ToolchainManager:
 
         host_tools = [
             "squashfs-tools", "zstd", "xorriso", "grub-common", "grub-pc-bin",
-            "grub-efi-amd64-bin", "grub-efi-ia32-bin", "mtools", "dosfstools", "qemu-utils",
+            "grub-efi-amd64-bin", "grub-efi-ia32-bin", "mtools", "dosfstools", "qemu-utils", "parted", "btrfs-progs",
             "syslinux-utils", "fdisk", "util-linux", "ca-certificates"
         ]
 
