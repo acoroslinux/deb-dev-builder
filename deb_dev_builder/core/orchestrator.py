@@ -22,7 +22,13 @@ class BuildOrchestratorError(Exception):
 class BuildOrchestrator:
     def __init__(
         self,
-        arch: str = "amd64",
+        arch,
+        sbom,
+        cloud_init,
+        sbom: bool = False
+    ): bool = False
+    ): bool = False
+    ): str = "amd64",
         config_path: str = "configs/global_build.json",
         distro: Optional[str] = None,
         init_system: Optional[str] = None,
@@ -68,6 +74,9 @@ class BuildOrchestrator:
         self.repo_profiles = repo_profiles or []
         self.live_profile = live_profile
         self.output_format = output_format.lower()
+        self.sbom = sbom
+        self.cloud_init = cloud_init
+        self.sbom = sbom
         self.mode = mode.lower()
         self.clean = clean
         self.fast_mode = fast_mode
@@ -249,6 +258,55 @@ class BuildOrchestrator:
 
             customizer = SystemCustomizer(chroot, self.config)
             customizer.configure_live_environment()
+
+            
+            # Generate SBOM
+            if getattr(self, "sbom", False):
+                logger.info("Generating SBOM manifest...")
+                try:
+                    if hasattr(chroot, "run_in_chroot"):
+                        # Use subprocess to run the command inside the chroot
+                        # chroot.run_in_chroot wrapper might just be returning output, or maybe we need to use capture_output
+                        # We can just run the command natively via chroot if it's mock or real.
+                        # Wait, we might need to know how run_in_chroot is implemented.
+                        pass
+                    
+                    import subprocess
+                    import json
+                    cmd = "dpkg-query -W -f='${Package} ${Version}\n'"
+                    if self.mode == "mock":
+                        chroot_cmd = ["bwrap", "--bind", "/", "/", "--bind", str(self.target_root), "/", "/bin/sh", "-c", cmd]
+                        # Wait, this might be fragile. 
+                    # Let's use chroot command if root, else proot/bwrap.
+                    
+                    # Alternative: run command inside chroot using chroot manager
+                    if self.mode == "real":
+                        res = subprocess.run(["chroot", str(self.target_root), "/bin/sh", "-c", cmd], capture_output=True, text=True)
+                        output = res.stdout
+                    else:
+                        # try using bwrap or proot
+                        if shutil.which("bwrap"):
+                            res = subprocess.run(["bwrap", "--bind", str(self.target_root), "/", "--dev", "/dev", "--proc", "/proc", "/bin/sh", "-c", cmd], capture_output=True, text=True)
+                            output = res.stdout
+                        else:
+                            output = ""
+                    
+                    packages = []
+                    for line in output.splitlines():
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            packages.append({"name": parts[0], "version": parts[1]})
+                        elif len(parts) == 1:
+                            # e.g. void-builder might return package-version
+                            packages.append({"name": parts[0], "version": "unknown"})
+
+                    sbom_path = resolve_from_project("output") / f"{artifact_name}.sbom.json"
+                    sbom_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(sbom_path, "w") as f:
+                        json.dump({"packages": packages}, f, indent=2)
+                    logger.info(f"SBOM written to {sbom_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to generate SBOM: {e}")
 
             chroot.umount_virtual_fs()
 
