@@ -469,7 +469,7 @@ class ISOEngine:
 
         iso_bin = isolinux_target / "isolinux.bin"
         if iso_bin.exists() and iso_bin.stat().st_size > 0:
-            isolinux_template = resolve_from_project("configs/bootloaders/templates/isolinux.cfg.in")
+            isolinux_template = resolve_from_project("configs/boot/templates/isolinux.cfg.in")
             placeholders = self._get_template_placeholders()
             if isolinux_template.exists():
                 syslinux_cfg = isolinux_template.read_text()
@@ -543,7 +543,7 @@ class ISOEngine:
         placeholders = self._get_template_placeholders()
 
         # 1. Load config.cfg from template if available
-        config_template = resolve_from_project("configs/bootloaders/templates/config.cfg.in")
+        config_template = resolve_from_project("configs/boot/templates/config.cfg.in")
         if config_template.exists():
             config_cfg_text = config_template.read_text()
             for k, v in placeholders.items():
@@ -573,7 +573,7 @@ class ISOEngine:
             )
 
         # 2. Load grub.cfg from template if available
-        grub_template = resolve_from_project("configs/bootloaders/templates/grub.cfg.in")
+        grub_template = resolve_from_project("configs/boot/templates/grub.cfg.in")
         if grub_template.exists():
             grub_cfg_text = grub_template.read_text()
             for k, v in placeholders.items():
@@ -600,7 +600,7 @@ class ISOEngine:
             )
 
         # 3. Load loopback.cfg from template if available
-        loopback_template = resolve_from_project("configs/bootloaders/templates/loopback.cfg.in")
+        loopback_template = resolve_from_project("configs/boot/templates/loopback.cfg.in")
         if loopback_template.exists():
             loopback_cfg_text = loopback_template.read_text()
             for k, v in placeholders.items():

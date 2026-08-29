@@ -59,7 +59,7 @@ class ConfigLoader:
     ) -> Dict[str, Any]:
 
         config = {
-            "packages": [],
+            "software": [],
             "groups": [],
             "services": {"enable": [], "disable": []},
             "repos": [],
@@ -79,43 +79,43 @@ class ConfigLoader:
 
         # 2. Distro
         if distro:
-            config = self._merge_dicts(config, self.load_profile("distros", distro))
+            config = self._merge_dicts(config, self.load_profile("system", distro))
 
         # 3. Init system
         if init_system:
-            config = self._merge_dicts(config, self.load_profile("init-systems", init_system))
+            config = self._merge_dicts(config, self.load_profile("system", init_system))
 
         # 4. Architecture
         config = self._merge_dicts(config, self.load_profile("architectures", architecture))
 
         # 5. Variant
         if variant:
-            config = self._merge_dicts(config, self.load_profile("variants", variant))
+            config = self._merge_dicts(config, self.load_profile("system", variant))
 
         # 6. Desktop
         if desktop:
             config = self._merge_dicts(config, self.load_profile("desktops", desktop))
             # Automatically include xorg package profile for display server support
-            config = self._merge_dicts(config, self.load_profile("packages", "xorg"))
+            config = self._merge_dicts(config, self.load_profile("software", "xorg"))
 
         # 7. Kernel
         if kernel:
-            config = self._merge_dicts(config, self.load_profile("kernels", kernel))
+            config = self._merge_dicts(config, self.load_profile("system", kernel))
 
         # 8. Bootloader
         if bootloader:
             if isinstance(bootloader, dict):
                 config = self._merge_dicts(config, {"bootloader": bootloader})
             else:
-                config = self._merge_dicts(config, self.load_profile("bootloaders", bootloader))
+                config = self._merge_dicts(config, self.load_profile("boot", bootloader))
 
         # 9. Base packages
-        config = self._merge_dicts(config, self.load_profile("packages", "base"))
+        config = self._merge_dicts(config, self.load_profile("software", "base"))
 
         # 10. Package profiles
         if package_profiles:
             for profile in package_profiles:
-                config = self._merge_dicts(config, self.load_profile("packages", profile))
+                config = self._merge_dicts(config, self.load_profile("software", profile))
 
         # 11. Service profiles
         if service_profiles:
@@ -132,7 +132,7 @@ class ConfigLoader:
             config["live_user"] = self._merge_dicts(config.get("live_user", {}), self.load_profile("live-users", live_profile))
 
         # 14. Deduplicate lists
-        for key in ["packages", "groups", "repos", "kernel_packages"]:
+        for key in ["software", "groups", "repos", "kernel_packages"]:
             if key in config and isinstance(config[key], list):
                 config[key] = list(dict.fromkeys(config[key]))
 

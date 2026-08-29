@@ -320,7 +320,7 @@ class APTManager:
             if res.returncode == 0:
                 packages_file.write_text(res.stdout)
         elif shutil.which("apt-ftparchive"):
-            res = subprocess.run(["apt-ftparchive", "packages", "."], cwd=str(repo_dir), capture_output=True, text=True, check=False)
+            res = subprocess.run(["apt-ftparchive", "software", "."], cwd=str(repo_dir), capture_output=True, text=True, check=False)
             if res.returncode == 0:
                 packages_file.write_text(res.stdout)
 

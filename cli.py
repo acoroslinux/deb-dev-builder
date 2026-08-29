@@ -167,7 +167,7 @@ def main():
         "--package-profile",
         action="append",
         default=[],
-        help="Add package profile from configs/packages/.",
+        help="Add package profile from configs/software/.",
     )
 
     parser.add_argument(
@@ -320,7 +320,7 @@ def main():
 
     # ── Handle Device Profile ───────────────────────────────────────────────────
     if getattr(args, "device", None):
-        device_file = resolve_from_project(f"configs/devices/{args.device}.json")
+        device_file = resolve_from_project(f"configs/hardware/{args.device}.json")
         if device_file.exists():
             import json
             with open(device_file) as f:
@@ -356,12 +356,12 @@ def main():
         print("Available Deb-Dev-Builder profiles:")
         categories = [
             ("architectures", "architectures"),
-            ("distros",       "distros      "),
-            ("init-systems",  "init-systems "),
+            ("system",       "distros      "),
+            ("system",  "init-systems "),
             ("desktops",      "desktops     "),
-            ("kernels",       "kernels      "),
-            ("bootloaders",   "bootloaders  "),
-            ("packages",      "packages     "),
+            ("system",       "kernels      "),
+            ("boot",   "bootloaders  "),
+            ("software",      "packages     "),
             ("services",      "services     "),
             ("repos",         "repos        "),
         ]

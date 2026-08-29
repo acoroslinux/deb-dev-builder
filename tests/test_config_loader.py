@@ -26,5 +26,5 @@ class TestConfigLoader:
             "security", "system-utils", "virtualization", "wayland", "xorg"
         ]
         for name in required:
-            path = config_root / "packages" / f"{name}.json"
+            path = config_root / "software" / f"{name}.json"
             assert path.exists(), f"Missing package profile: {name}.json"

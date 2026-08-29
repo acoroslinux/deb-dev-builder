@@ -140,8 +140,8 @@ class BuildOrchestrator:
             elif self.fs_type == "xfs":
                 essential_boot_pkgs.append("xfsprogs")
         for pkg in essential_boot_pkgs:
-            if pkg not in self.config.get("packages", []):
-                self.config.setdefault("packages", []).append(pkg)
+            if pkg not in self.config.get("software", []):
+                self.config.setdefault("software", []).append(pkg)
 
     def validate(self) -> Dict[str, Any]:
         errors = []
@@ -230,7 +230,7 @@ class BuildOrchestrator:
             apt.configure_sources_list()
             apt.update_apt_cache()
 
-            pkgs = self.config.get("packages", [])
+            pkgs = self.config.get("software", [])
             if "zram-tools" not in pkgs: pkgs.append("zram-tools")
             apt.install_packages(pkgs)
 

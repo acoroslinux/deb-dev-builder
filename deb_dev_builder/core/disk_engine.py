@@ -31,6 +31,14 @@ class DiskEngine:
             out_path.touch()
             return out_path
             
+        
+        offline_repo_dir = self.config.get("offline_repo_dir")
+        if offline_repo_dir and __import__('pathlib').Path(offline_repo_dir).exists():
+            target_repo = self.target_root / "repo"
+            target_repo.parent.mkdir(parents=True, exist_ok=True)
+            if self.mode != "mock":
+                __import__('shutil').copytree(offline_repo_dir, target_repo, dirs_exist_ok=True)
+
         rootfs_size = self._calculate_image_size(self.target_root)
         efi_size = 300
         total_size = rootfs_size + efi_size + 4
