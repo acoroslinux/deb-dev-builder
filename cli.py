@@ -315,20 +315,6 @@ def main():
         help="Mount working directory as tmpfs in RAM for extreme build speed.",
     )
 
-    
-    parser.add_argument(
-        "--sbom",
-        action="store_true",
-        help="Generate a Software Bill of Materials (SBOM) JSON manifest",
-    )
-
-    
-    parser.add_argument(
-        "--cloud-init",
-        action="store_true",
-        help="Include cloud-init for cloud deployments",
-    )
-
     args = parser.parse_args()
 
 
@@ -419,10 +405,7 @@ def main():
             with_offline_repo=args.with_offline_repo,
             offline_repo_packages=parsed_offline_packages,
             force_isolated_toolchain=args.force_isolated_toolchain,
-        fast_mode=getattr(args, "fast_mode", False,
-        sbom=getattr(args, "sbom", False,
-        cloud_init=getattr(args, "cloud_init", False,
-        sbom=getattr(args, "sbom", False),,,,
+        fast_mode=getattr(args, "fast_mode", False),
         use_tmpfs=getattr(args, "tmpfs", False),)
     except (ConfigLoaderError, BuildOrchestratorError) as exc:
         print(f"❌ Error: {exc}", file=sys.stderr)
