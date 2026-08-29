@@ -1,0 +1,8 @@
+{
+    "name": "Pinebook Pro",
+    "architecture": "aarch64",
+    "bootloader": {
+        "type": "u-boot-pinebookpro"
+    },
+    "output_format": "img"
+}

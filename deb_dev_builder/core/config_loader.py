@@ -104,7 +104,10 @@ class ConfigLoader:
 
         # 8. Bootloader
         if bootloader:
-            config = self._merge_dicts(config, self.load_profile("bootloaders", bootloader))
+            if isinstance(bootloader, dict):
+                config = self._merge_dicts(config, {"bootloader": bootloader})
+            else:
+                config = self._merge_dicts(config, self.load_profile("bootloaders", bootloader))
 
         # 9. Base packages
         config = self._merge_dicts(config, self.load_profile("packages", "base"))

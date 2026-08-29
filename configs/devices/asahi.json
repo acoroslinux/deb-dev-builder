@@ -1,0 +1,8 @@
+{
+    "name": "Apple Silicon (Asahi)",
+    "architecture": "aarch64",
+    "bootloader": {
+        "type": "asahi"
+    },
+    "output_format": "img"
+}

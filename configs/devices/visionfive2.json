@@ -1,0 +1,8 @@
+{
+    "name": "VisionFive 2",
+    "architecture": "riscv64",
+    "bootloader": {
+        "type": "u-boot-visionfive2"
+    },
+    "output_format": "img"
+}

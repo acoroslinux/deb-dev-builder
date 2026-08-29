@@ -1,0 +1,8 @@
+{
+    "name": "Odroid N2",
+    "architecture": "aarch64",
+    "bootloader": {
+        "type": "u-boot-odroid-n2"
+    },
+    "output_format": "img"
+}

@@ -1,0 +1,8 @@
+{
+    "name": "RockPro64",
+    "architecture": "aarch64",
+    "bootloader": {
+        "type": "u-boot-rockpro64"
+    },
+    "output_format": "img"
+}

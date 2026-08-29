@@ -1,0 +1,8 @@
+{
+    "name": "Generic UEFI PC",
+    "architecture": "x86_64",
+    "bootloader": {
+        "type": "systemd-boot"
+    },
+    "output_format": "img"
+}

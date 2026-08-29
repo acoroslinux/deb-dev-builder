@@ -1,0 +1,8 @@
+{
+    "name": "Raspberry Pi 4",
+    "architecture": "aarch64",
+    "bootloader": {
+        "type": "u-boot-rpi4"
+    },
+    "output_format": "img"
+}

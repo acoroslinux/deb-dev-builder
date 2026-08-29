@@ -69,6 +69,12 @@ def main():
     )
 
     parser.add_argument(
+        "--device",
+        type=str,
+        help="Hardware device profile (e.g., rpi4, pinebookpro)",
+    )
+
+    parser.add_argument(
         "architecture",
         nargs="?",
         default="amd64",
@@ -311,6 +317,32 @@ def main():
 
     args = parser.parse_args()
 
+
+    # ── Handle Device Profile ───────────────────────────────────────────────────
+    if getattr(args, "device", None):
+        device_file = resolve_from_project(f"configs/devices/{args.device}.json")
+        if device_file.exists():
+            import json
+            with open(device_file) as f:
+                dev_cfg = json.load(f)
+            
+            # Explicitly update args.architecture if not provided on CLI
+            if "architecture" in dev_cfg:
+                # If architecture was not passed in sys.argv (not considering flags for architecture since it is positional usually)
+                arch_passed = any(a in getattr(args, "architecture", "") for a in sys.argv[1:]) if getattr(args, "architecture", None) else False
+                if not arch_passed or getattr(args, "architecture", "") == "x86_64":
+                    args.architecture = dev_cfg["architecture"]
+            
+            # Explicitly update format
+            if "output_format" in dev_cfg and "--format" not in sys.argv and "-f" not in sys.argv:
+                args.format = dev_cfg["output_format"]
+                
+            # Explicitly update bootloader
+            if "bootloader" in dev_cfg and "--bootloader" not in sys.argv and "-b" not in sys.argv:
+                # To prevent config_loader from crashing when we pass a dict, we can dump it to a temporary file
+                # OR we just set args.bootloader = dev_cfg["bootloader"] and fix config_loader.py
+                args.bootloader = dev_cfg["bootloader"]
+                
     # Map architectures to Debian style
     if hasattr(args, 'architecture'):
         if args.architecture == 'x86_64':
