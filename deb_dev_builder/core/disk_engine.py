@@ -187,7 +187,8 @@ menuentry "Debian Linux" {{
             subprocess.run(["dd", f"if={efi_img}", f"of={out_path}", "bs=1M", "seek=1", "conv=notrunc", "status=none"], check=True)
             subprocess.run(["dd", f"if={root_img}", f"of={out_path}", "bs=1M", f"seek={efi_size+1}", "conv=notrunc", "status=none"], check=True)
 
-        bootloader_type = self.config.get("bootloader", "")
+        bootloader_cfg = self.config.get("bootloader", "")
+        bootloader_type = bootloader_cfg.get("type", "") if isinstance(bootloader_cfg, dict) else (bootloader_cfg or "")
 
         if bootloader_type.startswith("u-boot"):
 
