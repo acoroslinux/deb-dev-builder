@@ -78,7 +78,7 @@ def main():
         "architecture",
         nargs="?",
         default="amd64",
-        choices=["x86_64", "aarch64", "riscv64", "ppc64le", "s390x"],
+        choices=list(VALID_ARCHS),
         help="Target architecture (amd64, i386, aarch64, armhf, riscv64). Default: amd64",
     )
 

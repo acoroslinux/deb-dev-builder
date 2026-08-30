@@ -3,6 +3,7 @@ import re
 import shutil
 import subprocess
 import time
+import hashlib
 from pathlib import Path
 from typing import Dict, Tuple, Any
 import logging
@@ -36,6 +37,13 @@ class ISOEngine:
         self.toolchain = toolchain
         self.iso_staging = self.workdir / "iso_root"
         self.arch = config.get("architecture", "amd64")
+
+    def _resolve_output_path(self, extension: str) -> Path:
+        requested = Path(self.output_name)
+        candidate = requested if requested.suffix == f".{extension}" else requested.with_suffix(f".{extension}")
+        if candidate.is_absolute() or candidate.parent != Path("."):
+            return candidate
+        return resolve_from_project("output") / candidate
 
     def get_bootloader_type(self) -> str:
         bootloader = self.config.get("bootloader", {})
@@ -824,7 +832,7 @@ class ISOEngine:
         except Exception as e:
             logger.warning(f"Could not write ISO md5sum.txt: {e}")
 
-        iso_path = resolve_from_project(f"output/{self.output_name}.iso")
+        iso_path = self._resolve_output_path("iso")
         iso_path.parent.mkdir(parents=True, exist_ok=True)
 
         if self.mode == "mock":
