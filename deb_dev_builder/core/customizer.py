@@ -589,6 +589,43 @@ class SystemCustomizer:
         except Exception as e:
             logger.warning("Could not fully configure locales: %s", e)
 
+
+    def apply_theme_assets(self, chroot):
+        import json
+        import shutil
+        from pathlib import Path
+        try:
+            from core.path_utils import resolve_from_project
+        except ImportError:
+            try:
+                # deb_dev_builder/core or fedora_builder/core
+                from ..core.path_utils import resolve_from_project
+            except ImportError:
+                def resolve_from_project(p): return Path(p)
+            
+        mapping_file = resolve_from_project("configs/assets/theme_mapping.json")
+        assets_dir = resolve_from_project("configs/assets")
+        
+        if not mapping_file.exists():
+            return
+            
+        try:
+            with open(mapping_file, 'r') as f:
+                mapping = json.load(f)
+                
+            for asset_name, paths in mapping.items():
+                src = assets_dir / asset_name
+                if src.exists():
+                    for target in paths:
+                        target_path = chroot.chroot_path / target.lstrip('/')
+                        target_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, target_path)
+        except Exception as e:
+            if 'logger' in globals():
+                logger.error(f"Failed to apply theme assets: {e}")
+            else:
+                print(f"Failed to apply theme assets: {e}")
+
     def copy_custom_files(self):
         """
         Copies custom files and overlays into the target rootfs chroot.
@@ -650,6 +687,8 @@ class SystemCustomizer:
                     dest_path.chmod(mode)
                 except Exception:
                     pass
+
+        self.apply_theme_assets(self.chroot)
 
     def configure_artwork(self):
         """Install custom Debian & Devuan Modern artwork."""

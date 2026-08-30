@@ -86,6 +86,19 @@ class BuildOrchestrator:
         self.offline_repo_packages = offline_repo_packages or []
         self.force_isolated_toolchain = force_isolated_toolchain
 
+        # --- SMART BOOTLOADER DEFAULTS ---
+        if not self.bootloader:
+            if self.output_format == "iso":
+                self.bootloader = {"type": "grub2-hybrid"}
+            elif getattr(self, "arch", "") in ("aarch64", "arm64"):
+                self.bootloader = {"type": "systemd-boot"}  # Default ARM UEFI
+            else:
+                self.bootloader = {"type": "grub2-uefi"}
+                
+        # We don't inject extra packages here because debian uses package profiles
+        # But we could ensure grub-efi is installed.
+        # ---------------------------------
+
         if self.multimedia_codecs and "multimedia" not in self.package_profiles:
             self.package_profiles.append("multimedia")
         if self.with_offline_repo and "offline-repo" not in self.package_profiles:
@@ -249,6 +262,27 @@ class BuildOrchestrator:
 
             customizer = SystemCustomizer(chroot, self.config)
             customizer.configure_live_environment()
+            
+            # --- INSTALL BOOTLOADER IN CHROOT (DEBIAN SPECIFIC) ---
+            disk_formats = {"img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi"}
+            if self.output_format in disk_formats:
+                bcfg = self.config.get("bootloader", {})
+                btype = bcfg.get("type", "") if isinstance(bcfg, dict) else (bcfg or "")
+                
+                if self.mode == "real":
+                    if "grub" in btype:
+                        print(f"\n[ORCHESTRATOR] Installing GRUB Bootloader ({btype}) into chroot /boot/efi...")
+                        chroot.run_in_chroot(["mkdir", "-p", "/boot/efi/EFI"])
+                        grub_target = "arm64-efi" if self.arch in ("aarch64", "arm64") else "x86_64-efi"
+                        chroot.run_in_chroot(["grub-install", f"--target={grub_target}", "--efi-directory=/boot/efi", "--bootloader-id=debian", "--removable"], check=False)
+                        chroot.run_in_chroot(["grub-mkconfig", "-o", "/boot/grub/grub.cfg"], check=False)
+                    elif "systemd-boot" in btype:
+                        print(f"\n[ORCHESTRATOR] Installing systemd-boot Bootloader ({btype}) into chroot /boot/efi...")
+                        chroot.run_in_chroot(["mkdir", "-p", "/boot/efi/EFI"])
+                        chroot.run_in_chroot(["bootctl", "install", "--esp-path=/boot/efi"], check=False)
+                else:
+                    print(f"\n[MOCK] Simulated bootloader installation: {btype}")
+            # ----------------------------------------------------
 
             chroot.umount_virtual_fs()
 
