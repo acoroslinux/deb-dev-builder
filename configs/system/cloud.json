@@ -1,4 +1,3 @@
 {
-  "kernel": "cloud",
-  "packages": ["linux-image-cloud-amd64", "linux-headers-cloud-amd64"]
+  "kernel": "cloud"
 }

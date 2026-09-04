@@ -1,5 +1,6 @@
 {
   "desktop": "cinnamon",
   "display_manager": "lightdm",
+  "session_type": "x11",
   "packages": ["cinnamon-desktop-environment", "lightdm"]
 }

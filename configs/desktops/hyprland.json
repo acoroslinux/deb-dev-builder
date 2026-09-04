@@ -1,5 +1,7 @@
 {
   "desktop": "hyprland",
   "display_manager": "sddm",
+  "session_type": "wayland",
+  "supported_suites": ["trixie", "forky", "testing", "sid", "excalibur", "freia", "ceres"],
   "packages": ["hyprland", "sddm"]
 }

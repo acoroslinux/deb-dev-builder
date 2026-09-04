@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
+from deb_dev_builder.core.path_utils import resolve_output_path
 
 logger = logging.getLogger("disk_engine")
 
@@ -24,12 +25,53 @@ class DiskEngine:
         out = subprocess.check_output(["du", "-sm", str(rootfs)])
         return int(out.split()[0]) + 600
 
+    def _inject_boot_artifacts(self, image: Path) -> None:
+        hardware = self.config.get("hardware", {})
+        for entry in hardware.get("boot_artifacts", []):
+            source = self.target_root / entry["source"].lstrip("/")
+            if not source.is_file():
+                if entry.get("required", True):
+                    raise DiskEngineError(f"Required platform boot artifact is missing: {source}")
+                logger.warning("Optional platform boot artifact is missing: %s", source)
+                continue
+            with source.open("rb") as input_file, image.open("r+b") as output_file:
+                output_file.seek(entry["offset_kib"] * 1024)
+                shutil.copyfileobj(input_file, output_file)
+
+    def _validate_platform_files(self) -> None:
+        hardware = self.config.get("hardware", {})
+        missing = [
+            self.target_root / relative.lstrip("/")
+            for relative in hardware.get("required_files", [])
+            if not (self.target_root / relative.lstrip("/")).is_file()
+        ]
+        missing.extend(
+            self.target_root / entry["source"].lstrip("/")
+            for entry in hardware.get("boot_artifacts", [])
+            if entry.get("required", True)
+            and not (self.target_root / entry["source"].lstrip("/")).is_file()
+        )
+        if missing:
+            raise DiskEngineError(
+                "Required platform files are missing: " + ", ".join(str(path) for path in missing)
+            )
+
     def build_disk_image(self, target_format: str = "img") -> Path:
-        out_path = self.workdir.parent.parent / "output" / f"{self.output_name}.img"
+        requested_format = target_format.lower()
+        raw_extension = ".img" if requested_format == "img" else ".raw"
+        out_path = resolve_output_path(self.output_name, raw_extension)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         if self.mode == "mock":
-            out_path.touch()
-            return out_path
+            mock_path = resolve_output_path(self.output_name, ".img" if requested_format == "img" else f".{requested_format}")
+            mock_path.parent.mkdir(parents=True, exist_ok=True)
+            mock_path.touch()
+            return mock_path
+
+        self._validate_platform_files()
+
+        efi_staging = self.workdir / "efi_tmp"
+        if efi_staging.exists():
+            shutil.rmtree(efi_staging)
             
         
         offline_repo_dir = self.config.get("offline_repo_dir")
@@ -41,7 +83,8 @@ class DiskEngine:
 
         rootfs_size = self._calculate_image_size(self.target_root)
         efi_size = 300
-        total_size = rootfs_size + efi_size + 4
+        partition_start = self.config.get("hardware", {}).get("partition_start_mib", 1)
+        total_size = rootfs_size + efi_size + partition_start + 3
 
         efi_img = self.workdir / "efi.img"
         root_img = self.workdir / "root.img"
@@ -59,7 +102,10 @@ class DiskEngine:
                 self.toolchain.run_in_build_host(["mkfs.btrfs", "-L", "ROOTFS", "-r", str(self.target_root), str(root_img)], check=True)
             elif fs_type == "f2fs":
                 self.toolchain.run_in_build_host(["mkfs.f2fs", "-l", "ROOTFS", str(root_img)], check=True)
-                self.toolchain.run_in_build_host(["sload.f2fs", "-f", str(self.target_root), str(root_img)], check=False)
+                self.toolchain.run_in_build_host(["sload.f2fs", "-f", str(self.target_root), str(root_img)], check=True)
+            elif fs_type == "xfs":
+                self.toolchain.run_in_build_host(["mkfs.xfs", "-f", "-L", "ROOTFS", str(root_img)], check=True)
+                self._populate_mounted_filesystem(root_img)
             else:
                 self.toolchain.run_in_build_host(["mke2fs", "-t", "ext4", "-L", "ROOTFS", "-d", str(self.target_root), str(root_img)], check=True)
         else:
@@ -68,14 +114,17 @@ class DiskEngine:
                 subprocess.run(["mkfs.btrfs", "-L", "ROOTFS", "-r", str(self.target_root), str(root_img)], check=True)
             elif fs_type == "f2fs":
                 subprocess.run(["mkfs.f2fs", "-l", "ROOTFS", str(root_img)], check=True)
-                subprocess.run(["sload.f2fs", "-f", str(self.target_root), str(root_img)], check=False)
+                subprocess.run(["sload.f2fs", "-f", str(self.target_root), str(root_img)], check=True)
+            elif fs_type == "xfs":
+                subprocess.run(["mkfs.xfs", "-f", "-L", "ROOTFS", str(root_img)], check=True)
+                self._populate_mounted_filesystem(root_img)
             else:
                 subprocess.run(["mke2fs", "-t", "ext4", "-L", "ROOTFS", "-d", str(self.target_root), str(root_img)], check=True)
 
         # Update rootfs_size because mkfs.btrfs -r dynamically expands the file size!
         rootfs_size = (root_img.stat().st_size // (1024 * 1024)) + 10
         efi_size = self.config.get("bootloader", {}).get("efi_size", 300)
-        total_size = rootfs_size + efi_size + 4
+        total_size = rootfs_size + efi_size + partition_start + 3
         
         logger.info(f"Generating FAT32 EFI filesystem ({efi_size} MB)...")
         # Create FAT image
@@ -92,6 +141,7 @@ class DiskEngine:
         efi_boot_dir.mkdir(parents=True, exist_ok=True)
         
         bootloader_type = self.config.get("bootloader", {}).get("type", "grub2-hybrid")
+        platform_boot = bootloader_type.startswith("u-boot") or bootloader_type == "asahi"
         
         efi_fed_src = self.target_root / "boot" / "efi" / "EFI" / "debian"
         efi_boot_src = self.target_root / "boot" / "efi" / "EFI" / "BOOT"
@@ -104,7 +154,33 @@ class DiskEngine:
         kernel_params = self.config.get("boot", {}).get("kernel_params", "quiet")
         kernel_params = " ".join([p for p in kernel_params.split() if p != "rd.live.image"])
         
-        if bootloader_type == "systemd-boot":
+        if platform_boot:
+            firmware_tree = self.config.get("hardware", {}).get("firmware_tree")
+            if firmware_tree:
+                firmware_source = self.target_root / firmware_tree.lstrip("/")
+                if not firmware_source.is_dir():
+                    raise DiskEngineError(f"Required platform firmware tree is missing: {firmware_source}")
+                shutil.copytree(firmware_source, self.workdir / "efi_tmp", dirs_exist_ok=True)
+            boot_staging = self.workdir / "efi_tmp" / "boot"
+            boot_staging.mkdir(parents=True, exist_ok=True)
+            for source_name in (vmlinuz, initrd):
+                source = boot_dir / source_name
+                if not source.is_file():
+                    raise DiskEngineError(f"Required ARM boot file is missing: {source}")
+                shutil.copy2(source, boot_staging / source_name)
+            dtbs = boot_dir / "dtbs"
+            if dtbs.is_dir():
+                shutil.copytree(dtbs, boot_staging / "dtbs", dirs_exist_ok=True)
+            extlinux = self.workdir / "efi_tmp" / "extlinux"
+            extlinux.mkdir(parents=True, exist_ok=True)
+            (extlinux / "extlinux.conf").write_text(
+                "DEFAULT debian\nTIMEOUT 30\n\nLABEL debian\n"
+                "  MENU LABEL Debian GNU/Linux\n"
+                f"  LINUX /boot/{vmlinuz}\n"
+                f"  INITRD /boot/{initrd}\n"
+                f"  APPEND root=LABEL=ROOTFS rw {kernel_params}\n"
+            )
+        elif bootloader_type == "systemd-boot":
             import shutil
             # Install systemd-boot
             sd_boot_src = self.target_root / "usr" / "lib" / "systemd" / "boot" / "efi" / "systemd-bootx64.efi"
@@ -160,91 +236,76 @@ menuentry "Debian Linux" {{
 }}
 """)
 
+        if not platform_boot and not any(
+            path.is_file() and path.stat().st_size > 0 for path in efi_boot_dir.glob("*.EFI")
+        ):
+            raise DiskEngineError(f"No removable UEFI bootloader was installed in {efi_boot_dir}")
+
         # Copy files to FAT image using mcopy
-        if self.toolchain:
-            self.toolchain.run_in_build_host(["mcopy", "-s", "-i", str(efi_img), f"{self.workdir}/efi_tmp/EFI", "::/"], check=True)
-            if (self.workdir / "efi_tmp" / "loader").exists():
-                self.toolchain.run_in_build_host(["mcopy", "-s", "-i", str(efi_img), f"{self.workdir}/efi_tmp/loader", "::/"], check=True)
-            if (self.workdir / "efi_tmp" / vmlinuz).exists():
-                self.toolchain.run_in_build_host(["mcopy", "-i", str(efi_img), f"{self.workdir}/efi_tmp/{vmlinuz}", "::/"], check=True)
-                self.toolchain.run_in_build_host(["mcopy", "-i", str(efi_img), f"{self.workdir}/efi_tmp/{initrd}", "::/"], check=True)
-        else:
-            subprocess.run(["mcopy", "-s", "-i", str(efi_img), f"{self.workdir}/efi_tmp/EFI", "::/"], check=True)
-            if (self.workdir / "efi_tmp" / "loader").exists():
-                subprocess.run(["mcopy", "-s", "-i", str(efi_img), f"{self.workdir}/efi_tmp/loader", "::/"], check=True)
-            if (self.workdir / "efi_tmp" / vmlinuz).exists():
-                subprocess.run(["mcopy", "-i", str(efi_img), f"{self.workdir}/efi_tmp/{vmlinuz}", "::/"], check=True)
-                subprocess.run(["mcopy", "-i", str(efi_img), f"{self.workdir}/efi_tmp/{initrd}", "::/"], check=True)
+        for staged_item in sorted((self.workdir / "efi_tmp").iterdir()):
+            command = ["mcopy", "-s", "-i", str(efi_img), str(staged_item), "::/"]
+            if self.toolchain:
+                self.toolchain.run_in_build_host(command, check=True)
+            else:
+                subprocess.run(command, check=True)
 
         logger.info(f"Building partitioned disk image ({total_size} MB)...")
         if self.toolchain:
             self.toolchain.run_in_build_host(["dd", "if=/dev/zero", f"of={out_path}", "bs=1M", f"count={total_size}", "status=none"], check=True)
             self.toolchain.run_in_build_host(["parted", "-s", str(out_path), "mktable", "gpt"], check=True)
-            self.toolchain.run_in_build_host(["parted", "-s", str(out_path), "mkpart", "ESP", "fat32", "1MiB", f"{efi_size+1}MiB"], check=True)
+            self.toolchain.run_in_build_host(["parted", "-s", str(out_path), "mkpart", "ESP", "fat32", f"{partition_start}MiB", f"{efi_size+partition_start}MiB"], check=True)
             self.toolchain.run_in_build_host(["parted", "-s", str(out_path), "set", "1", "esp", "on"], check=True)
-            self.toolchain.run_in_build_host(["parted", "-s", str(out_path), f"mkpart", "primary", fs_type, f"{efi_size+1}MiB", "100%"], check=True)
+            self.toolchain.run_in_build_host(["parted", "-s", str(out_path), f"mkpart", "primary", fs_type, f"{efi_size+partition_start}MiB", "100%"], check=True)
             # Inject partitions
-            self.toolchain.run_in_build_host(["dd", f"if={efi_img}", f"of={out_path}", "bs=1M", "seek=1", "conv=notrunc", "status=none"], check=True)
-            self.toolchain.run_in_build_host(["dd", f"if={root_img}", f"of={out_path}", "bs=1M", f"seek={efi_size+1}", "conv=notrunc", "status=none"], check=True)
+            self.toolchain.run_in_build_host(["dd", f"if={efi_img}", f"of={out_path}", "bs=1M", f"seek={partition_start}", "conv=notrunc", "status=none"], check=True)
+            self.toolchain.run_in_build_host(["dd", f"if={root_img}", f"of={out_path}", "bs=1M", f"seek={efi_size+partition_start}", "conv=notrunc", "status=none"], check=True)
         else:
             subprocess.run(["dd", "if=/dev/zero", f"of={out_path}", "bs=1M", f"count={total_size}", "status=none"], check=True)
             subprocess.run(["parted", "-s", str(out_path), "mktable", "gpt"], check=True)
-            subprocess.run(["parted", "-s", str(out_path), "mkpart", "ESP", "fat32", "1MiB", f"{efi_size+1}MiB"], check=True)
+            subprocess.run(["parted", "-s", str(out_path), "mkpart", "ESP", "fat32", f"{partition_start}MiB", f"{efi_size+partition_start}MiB"], check=True)
             subprocess.run(["parted", "-s", str(out_path), "set", "1", "esp", "on"], check=True)
-            subprocess.run(["parted", "-s", str(out_path), f"mkpart", "primary", fs_type, f"{efi_size+1}MiB", "100%"], check=True)
-            subprocess.run(["dd", f"if={efi_img}", f"of={out_path}", "bs=1M", "seek=1", "conv=notrunc", "status=none"], check=True)
-            subprocess.run(["dd", f"if={root_img}", f"of={out_path}", "bs=1M", f"seek={efi_size+1}", "conv=notrunc", "status=none"], check=True)
+            subprocess.run(["parted", "-s", str(out_path), f"mkpart", "primary", fs_type, f"{efi_size+partition_start}MiB", "100%"], check=True)
+            subprocess.run(["dd", f"if={efi_img}", f"of={out_path}", "bs=1M", f"seek={partition_start}", "conv=notrunc", "status=none"], check=True)
+            subprocess.run(["dd", f"if={root_img}", f"of={out_path}", "bs=1M", f"seek={efi_size+partition_start}", "conv=notrunc", "status=none"], check=True)
 
-        bootloader_cfg = self.config.get("bootloader", "")
-        bootloader_type = bootloader_cfg.get("type", "") if isinstance(bootloader_cfg, dict) else (bootloader_cfg or "")
-
-        if bootloader_type.startswith("u-boot"):
-
-            if bootloader_type == "u-boot-pinebookpro":
-
-                logger.info("Injecting U-Boot for Pinebook Pro...")
-
-                try:
-
-                    if hasattr(self, "toolchain") and self.toolchain:
-
-                        self.toolchain.run_in_build_host(["dd", f"if={self.target_root}/boot/u-boot/idbloader.img", f"of={out_path}", "bs=512", "seek=64", "conv=notrunc"], check=False)
-
-                        self.toolchain.run_in_build_host(["dd", f"if={self.target_root}/boot/u-boot/u-boot.itb", f"of={out_path}", "bs=512", "seek=16384", "conv=notrunc"], check=False)
-
-                    else:
-
-                        import subprocess
-
-                        subprocess.run(["dd", f"if={self.target_root}/boot/u-boot/idbloader.img", f"of={out_path}", "bs=512", "seek=64", "conv=notrunc"], check=False)
-
-                        subprocess.run(["dd", f"if={self.target_root}/boot/u-boot/u-boot.itb", f"of={out_path}", "bs=512", "seek=16384", "conv=notrunc"], check=False)
-
-                except Exception as e:
-
-                    logger.warning(f"U-boot inject error (mock?): {e}")
+        self._inject_boot_artifacts(out_path)
         final_out = out_path
-        if target_format != "img":
-            vm_out = out_path.with_name(f"{self.output_name}.{target_format}")
+        if requested_format not in {"img", "raw"}:
+            vm_out = resolve_output_path(self.output_name, f".{requested_format}")
             logger.info(f"Converting raw disk image to VM format: {target_format}...")
+            qemu_format = {"vhd": "vpc"}.get(requested_format, requested_format)
             if self.toolchain:
-                self.toolchain.run_in_build_host(["qemu-img", "convert", "-f", "raw", "-O", target_format, str(out_path), str(vm_out)], check=True)
+                self.toolchain.run_in_build_host(["qemu-img", "convert", "-f", "raw", "-O", qemu_format, str(out_path), str(vm_out)], check=True)
             else:
-                subprocess.run(["qemu-img", "convert", "-f", "raw", "-O", target_format, str(out_path), str(vm_out)], check=True)
+                subprocess.run(["qemu-img", "convert", "-f", "raw", "-O", qemu_format, str(out_path), str(vm_out)], check=True)
             out_path.unlink()
             final_out = vm_out
             out_path = final_out
 
-        compression = self.config.get("compression", "zstd")
+        if not out_path.is_file() or out_path.stat().st_size == 0:
+            raise DiskEngineError(f"Disk image was not created: {out_path}")
+        if requested_format not in {"img", "raw"}:
+            validator = ["qemu-img", "info", "--output=json", str(out_path)]
+            if self.toolchain:
+                self.toolchain.run_in_build_host(validator, check=True)
+            else:
+                subprocess.run(validator, check=True, capture_output=True)
+
+        compression = self.config.get("compression")
+        if not compression:
+            return out_path
         logger.info(f"Compressing disk image with {compression}...")
         
         final_path = out_path
         if compression == "xz":
-            cmd = ["xz", "-z9", "-T0", str(out_path)]
+            cmd = ["xz", "-z9", "-T0", "-f", str(out_path)]
             final_path = Path(f"{out_path}.xz")
         elif compression == "gz" or compression == "gzip":
-            cmd = ["gzip", "-9", str(out_path)]
+            cmd = ["gzip", "-9", "-f", str(out_path)]
             final_path = Path(f"{out_path}.gz")
+        elif compression == "lz4":
+            final_path = Path(f"{out_path}.lz4")
+            cmd = ["lz4", "-9", "-f", "--rm", str(out_path), str(final_path)]
         else: # zstd
             zstd_level = "-3" if self.config.get("fast_mode", False) else "-19"
             cmd = ["zstd", zstd_level, "-f", "-T0", "-q", "--rm", str(out_path)]
@@ -257,3 +318,14 @@ menuentry "Debian Linux" {{
             
         logger.info(f"Disk image generated successfully at {final_path}")
         return final_path
+
+    def _populate_mounted_filesystem(self, image: Path) -> None:
+        """Populate filesystems whose mkfs utility cannot import a directory."""
+        mountpoint = self.workdir / "rootfs_mount"
+        mountpoint.mkdir(parents=True, exist_ok=True)
+        runner = self.toolchain.run_in_build_host if self.toolchain else lambda cmd, check=True: subprocess.run(cmd, check=check)
+        runner(["mount", "-o", "loop", str(image), str(mountpoint)], check=True)
+        try:
+            runner(["cp", "-a", f"{self.target_root}/.", str(mountpoint)], check=True)
+        finally:
+            runner(["umount", str(mountpoint)], check=True)

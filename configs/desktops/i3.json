@@ -1,5 +1,6 @@
 {
   "desktop": "i3",
   "display_manager": "lightdm",
+  "session_type": "x11",
   "packages": ["i3", "lightdm"]
 }

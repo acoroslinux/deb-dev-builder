@@ -11,7 +11,7 @@ echo "Detecting package manager..."
 if command -v apt >/dev/null 2>&1; then
     echo "Installing via apt..."
     apt update
-    apt install -y mmdebstrap debootstrap qemu-user-static binfmt-support xorriso squashfs-tools syslinux-common mtools dosfstools grub-common grub-efi-amd64-bin grub-efi-ia32-bin grub-pc-bin
+    apt install -y mmdebstrap debootstrap qemu-user-static binfmt-support xorriso squashfs-tools syslinux-common mtools dosfstools grub-common grub-efi-amd64-bin grub-efi-ia32-bin grub-pc-bin qemu-utils parted zstd xz-utils gzip lz4 e2fsprogs btrfs-progs xfsprogs f2fs-tools
 elif command -v dnf >/dev/null 2>&1; then
     echo "Installing via dnf..."
     dnf install -y debootstrap qemu-user-static binfmt-support xorriso squashfs-tools syslinux mtools dosfstools grub2-tools grub2-efi-x64-modules grub2-efi-ia32-modules grub2-pc-modules

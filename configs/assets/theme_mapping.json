@@ -1,10 +1,9 @@
 {
     "background.png": [
-        "/grub/modern/background.png",
-        "/backgrounds/default-wallpaper.png",
-        "/backgrounds/deb-dev-modern-wallpaper.jpg",
-        "/plymouth/themes/deb-dev-modern/splash.png",
-        "/plymouth/themes/deb-dev-modern/background.png",
+        "/usr/share/backgrounds/default-wallpaper.png",
+        "/usr/share/backgrounds/deb-dev-modern-wallpaper.jpg",
+        "/usr/share/plymouth/themes/deb-dev-modern/splash.png",
+        "/usr/share/plymouth/themes/deb-dev-modern/background.png",
         "/usr/share/backgrounds/deb-dev-modern/deb-dev-modern.jpg",
         "/boot/grub/themes/deb-dev-modern/deb-dev-grub-bg.jpg"
     ]

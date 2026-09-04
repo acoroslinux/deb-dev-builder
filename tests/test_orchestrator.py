@@ -34,6 +34,13 @@ class TestOrchestrator:
         assert orch.config.get("bootloader", {}).get("type") == "grub2-uefi"
         assert orch.config.get("bootloader_type") == "grub2-uefi"
 
+    def test_cli_style_overrides_reach_runtime_config(self):
+        orch = make_orchestrator(compression="xz", hostname="workstation", live_user_name="demo", with_flathub=True)
+        assert orch.config["compression"] == "xz"
+        assert orch.config["hostname"] == "workstation"
+        assert orch.config["live_user"]["name"] == "demo"
+        assert "flatpak" in orch.config["software"]
+
     def test_mock_build_debian(self, tmp_path):
         orch = make_orchestrator(tmp_path=tmp_path, distro="debian-12", desktop="gnome")
         result = orch.build()
@@ -44,8 +51,90 @@ class TestOrchestrator:
         result = orch.build()
         assert isinstance(result, Path)
 
+    def test_devuan_default_init_does_not_pull_systemd(self):
+        orch = make_orchestrator(distro="devuan-5", init_system=None)
+        assert orch.init_system == "sysvinit"
+        assert "systemd-sysv" not in orch.config["software"]
+        assert "live-config-sysvinit" in orch.config["software"]
+
+    def test_nonbootable_artifacts_do_not_include_firmware(self):
+        orch = make_orchestrator(output_format="oci")
+        assert "firmware-iwlwifi" not in orch.config["software"]
+        assert "dosfstools" not in orch.config["software"]
+
+    def test_hyprland_rejects_unsupported_bookworm(self):
+        orch = make_orchestrator(distro="debian-12", desktop="hyprland")
+        report = orch.validate()
+        assert report["valid"] is False
+        assert "supported suites" in report["errors"][0]
+
+    @pytest.mark.parametrize("output_format,extension", [
+        ("iso", ".iso"), ("img", ".img"), ("raw", ".raw"),
+        ("qcow2", ".qcow2"), ("vdi", ".vdi"), ("vmdk", ".vmdk"),
+        ("vhd", ".vhd"), ("vhdx", ".vhdx"), ("tarball", ".tar.xz"),
+        ("oci", ".oci.tar"), ("container", ".oci.tar"),
+    ])
+    def test_mock_build_artifact_matrix(self, tmp_path, output_format, extension):
+        orch = make_orchestrator(tmp_path=tmp_path, output_format=output_format)
+        result = orch.build(output_name=str(tmp_path / "artifacts" / "test.iso"))
+        assert str(result).endswith(extension)
+        assert result.exists()
+
+    def test_mock_netboot_artifact(self, tmp_path):
+        orch = make_orchestrator(
+            tmp_path=tmp_path,
+            output_format="netboot",
+            with_debian_installer=True,
+            di_mode="netboot",
+        )
+        result = orch.build(output_name=str(tmp_path / "artifacts" / "debian"))
+        assert result.name.endswith(".netboot.tar.gz")
+        assert result.exists()
+
+    def test_installer_combinations_are_validated(self):
+        assert make_orchestrator(with_calamares=True).validate()["valid"] is False
+        assert make_orchestrator(
+            distro="devuan-5", init_system="sysvinit", with_debian_installer=True
+        ).validate()["valid"] is False
+        assert make_orchestrator(
+            with_debian_installer=True, di_mode="netinstall", output_format="iso"
+        ).validate()["valid"] is True
+
+    def test_hardware_profile_selects_platform_bootloader(self):
+        orch = make_orchestrator(
+            arch="aarch64",
+            distro="debian-13",
+            output_format="img",
+            hardware_profile="pinebookpro",
+            bootloader=None,
+        )
+        assert orch.config["bootloader_type"] == "u-boot-pinebookpro"
+
+    def test_vm_profile_requires_its_native_format(self):
+        valid = make_orchestrator(output_format="qcow2", vm_profile="qemu")
+        invalid = make_orchestrator(output_format="vdi", vm_profile="qemu")
+        assert valid.validate()["valid"] is True
+        assert invalid.validate()["valid"] is False
+
     def test_mock_build_tarball(self, tmp_path):
         orch = make_orchestrator(tmp_path=tmp_path, distro="debian-12", output_format="tarball")
         result = orch.build()
         assert isinstance(result, Path)
         assert result.name.endswith(".tar.xz")
+
+    def test_output_inside_workdir_is_rejected_before_cleanup(self, tmp_path):
+        orch = make_orchestrator(tmp_path=tmp_path)
+        with pytest.raises(Exception, match="inside the disposable workdir"):
+            orch.build(output_name=str(orch.workdir / "artifact.iso"))
+
+    def test_invalid_live_user_is_rejected_before_build(self):
+        orch = make_orchestrator(live_user_name="bad;user")
+        assert "Live user name must be a valid Linux login name." in orch.validate()["errors"]
+
+    def test_generated_checksums_are_verified(self, tmp_path):
+        artifact = tmp_path / "artifact.iso"
+        artifact.write_bytes(b"artifact contents")
+        orch = make_orchestrator()
+        orch._generate_checksums(artifact)
+        assert (tmp_path / "artifact.iso.sha256").is_file()
+        assert (tmp_path / "artifact.iso.md5").is_file()

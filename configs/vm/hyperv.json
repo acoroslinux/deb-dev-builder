@@ -1,0 +1,7 @@
+{
+  "name": "Microsoft Hyper-V",
+  "output_format": "vhdx",
+  "firmware": "uefi",
+  "supported_architectures": ["amd64"],
+  "packages": ["hyperv-daemons"]
+}

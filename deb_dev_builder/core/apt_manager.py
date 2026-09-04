@@ -1,4 +1,6 @@
 import os
+import json
+import hashlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,7 +22,9 @@ class APTManager:
 
     def resolve_cache_dir(self) -> Path:
         arch = getattr(self.chroot, "arch", "amd64")
-        cache_path_str = self.config.get("system", {}).get("apt_cache", f"cache/{arch}/apt")
+        configured_cache = self.config.get("system", {}).get("apt_cache")
+        workspace_cache = self.target_root.parent.parent / "cache" / arch / "apt"
+        cache_path_str = configured_cache or str(workspace_cache)
         candidate = Path(cache_path_str)
         if not candidate.is_absolute():
             from deb_dev_builder.core.path_utils import resolve_from_project
@@ -35,14 +39,40 @@ class APTManager:
             fallback.mkdir(parents=True, exist_ok=True)
             return fallback
 
-    def _is_bootstrapped_rootfs(self) -> bool:
+    def _is_bootstrapped_rootfs(self, suite: str, arch: str) -> bool:
         """Detect whether target root already contains a usable base system."""
         checks = [
             self.target_root / "etc" / "os-release",
             self.target_root / "usr" / "bin" / "dpkg",
             self.target_root / "etc" / "apt",
         ]
-        return all(path.exists() for path in checks)
+        if not all(path.exists() for path in checks):
+            return False
+        marker = self.target_root / ".deb-dev-builder-bootstrap.json"
+        try:
+            metadata = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        return metadata.get("suite") == suite and metadata.get("arch") == arch
+
+    def _write_bootstrap_marker(self, suite: str, arch: str) -> None:
+        marker = self.target_root / ".deb-dev-builder-bootstrap.json"
+        marker.write_text(json.dumps({"suite": suite, "arch": arch}, sort_keys=True) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _seed_is_verified(self, seed_cache: Path) -> bool:
+        checksum_path = seed_cache.with_name(f"{seed_cache.name}.sha256")
+        if not seed_cache.is_file() or not checksum_path.is_file():
+            return False
+        fields = checksum_path.read_text(encoding="utf-8").strip().split(maxsplit=1)
+        return len(fields) == 2 and fields[1].lstrip("*") == seed_cache.name and fields[0].lower() == self._sha256(seed_cache)
 
     def configure_sources_list(self):
         sources_dir = self.target_root / "etc" / "apt"
@@ -54,10 +84,19 @@ class APTManager:
                 pass
             return
 
+        sources_list_dir = sources_dir / "sources.list.d"
+        if sources_list_dir.exists():
+            for old_source in list(sources_list_dir.glob("*.list")) + list(sources_list_dir.glob("*.sources")):
+                old_source.unlink()
+
         # Read configuration directly from the loaded distro profile
         mirror = self.config.get("mirror", "http://deb.debian.org/debian")
         suite = self.config.get("suite", "bookworm")
         components = self.config.get("components", ["main", "contrib", "non-free-firmware"])
+        if not isinstance(components, list) or not components or not all(isinstance(c, str) and c for c in components):
+            raise APTManagerError("Repository components must be a non-empty list of strings")
+        if not mirror or not suite:
+            raise APTManagerError("Both repository mirror and suite must be configured")
         comp_str = " ".join(components)
 
         sources_lines = [
@@ -93,6 +132,8 @@ class APTManager:
                     sources_lines.append(repo)
                 elif isinstance(repo, dict):
                     repo_url = repo.get("url", "")
+                    if not repo_url:
+                        raise APTManagerError("Extra repository entry is missing its URL")
                     repo_suite = repo.get("suite", suite)
                     repo_comps = " ".join(repo.get("components", components))
                     sources_lines.append(f"deb {repo_url} {repo_suite} {repo_comps}")
@@ -120,29 +161,45 @@ class APTManager:
                 logger.debug("Mock rootfs creation ignored due to permissions.")
             return
 
-        if reuse_existing and self._is_bootstrapped_rootfs():
+        configured_suite = self.config.get("suite", suite)
+        if reuse_existing and self._is_bootstrapped_rootfs(configured_suite, arch):
             logger.info("♻️ Reusing existing rootfs because --no-clean was requested.")
             return
+        if reuse_existing and (self.target_root / "etc" / "os-release").exists():
+            raise APTManagerError(
+                "Existing rootfs does not match the selected suite/architecture; rerun with --clean"
+            )
 
         distro = self.config.get("distro", "debian-12")
         seeds_dir = self.resolve_cache_dir().parent / "seeds"
         seeds_dir.mkdir(parents=True, exist_ok=True)
         seed_cache = seeds_dir / f"seed-{distro}-{arch}.tar.gz"
 
-        if use_seed and not recreate_seed and seed_cache.exists():
+        if use_seed and not recreate_seed and self._seed_is_verified(seed_cache):
             logger.info(f"⚡ Fast-bootstrapping rootfs from local seed tarball: {seed_cache}")
             self.target_root.mkdir(parents=True, exist_ok=True)
             res = subprocess.run(["tar", "xzpf", str(seed_cache), "-C", str(self.target_root), "--numeric-owner"])
             if res.returncode == 0 and (self.target_root / "etc" / "os-release").exists():
+                self._write_bootstrap_marker(configured_suite, arch)
                 logger.info("⚡ Successfully bootstrapped rootfs from local seed tarball in under 3 seconds!")
                 self.sync_cache_to_target()
                 return
             else:
                 logger.warning("Local seed tarball extraction failed. Falling back to network bootstrap.")
+                from deb_dev_builder.core.path_utils import safe_remove_tree, resolve_from_project
+                safe_remove_tree(self.target_root, allowed_root=resolve_from_project("workdir"))
+                self.target_root.mkdir(parents=True, exist_ok=True)
+        elif use_seed and not recreate_seed and seed_cache.exists():
+            logger.warning("Ignoring unverified rootfs seed cache: %s", seed_cache)
 
         mirror = self.config.get("mirror", "http://deb.debian.org/debian")
-        suite = self.config.get("suite", suite)
+        suite = configured_suite
         components = ",".join(self.config.get("components", ["main", "contrib", "non-free-firmware"]))
+        is_devuan = str(self.config.get("distro", "")).startswith("devuan-")
+        devuan_keyring = next((path for path in (
+            Path("/usr/share/keyrings/devuan-archive-keyring.gpg"),
+            Path("/usr/share/keyrings/devuan-keyring.gpg"),
+        ) if path.is_file()), None)
 
         dev_dir = self.target_root / "dev"
         dev_dir.mkdir(parents=True, exist_ok=True)
@@ -165,18 +222,39 @@ class APTManager:
                 str(self.target_root),
                 mirror,
             ]
-        else:
+            if is_devuan:
+                cmd.insert(1, "--include=devuan-keyring")
+                if devuan_keyring:
+                    cmd.insert(1, f"--keyring={devuan_keyring}")
+                else:
+                    cmd[1:1] = [
+                        "--aptopt=Acquire::AllowInsecureRepositories=true",
+                        "--aptopt=APT::Get::AllowUnauthenticated=true",
+                    ]
+        elif shutil.which("debootstrap"):
             cmd = [
                 "debootstrap",
                 f"--arch={arch}",
                 f"--components={components}",
-                "--no-check-gpg",
                 suite,
                 str(self.target_root),
                 mirror,
             ]
+            if is_devuan:
+                cmd.insert(1, "--include=devuan-keyring")
+                if devuan_keyring:
+                    cmd.insert(1, f"--keyring={devuan_keyring}")
+                else:
+                    cmd.insert(1, "--no-check-gpg")
+        else:
+            raise APTManagerError("Neither mmdebstrap nor debootstrap is installed on the host")
 
-        res = subprocess.run(cmd)
+        if self.toolchain is not None and getattr(self.toolchain, "use_isolated", False):
+            # The target path is exposed through the project bind mount in the
+            # isolated build_host; do not execute bootstrap helpers on host.
+            res = self.toolchain.run_in_build_host(cmd, check=False)
+        else:
+            res = subprocess.run(cmd)
         if res.returncode != 0:
             log_file = self.target_root / "debootstrap" / "debootstrap.log"
             err_detail = ""
@@ -188,17 +266,35 @@ class APTManager:
                     pass
             raise APTManagerError(f"Bootstrap failed with exit code: {res.returncode}{err_detail}")
 
+        host_resolv = Path("/etc/resolv.conf")
+        target_resolv = self.target_root / "etc" / "resolv.conf"
+        if host_resolv.exists():
+            target_resolv.parent.mkdir(parents=True, exist_ok=True)
+            if target_resolv.is_symlink():
+                target_resolv.unlink()
+            shutil.copy2(host_resolv, target_resolv)
+
         self.configure_sources_list()
+        self._write_bootstrap_marker(suite, arch)
 
         # Save seed tarball for future instant builds (excluding virtual kernel filesystems)
         try:
             seed_cache.parent.mkdir(parents=True, exist_ok=True)
             logger.info(f"⚡ Fast-caching rootfs seed tarball to {seed_cache}...")
-            subprocess.run([
-                "tar", "czpf", str(seed_cache),
+            partial_seed = seed_cache.with_name(f"{seed_cache.name}.partial")
+            partial_seed.unlink(missing_ok=True)
+            result = subprocess.run([
+                "tar", "czpf", str(partial_seed),
                 "--exclude=./proc/*", "--exclude=./sys/*", "--exclude=./dev/*", "--exclude=./tmp/*", "--exclude=./run/*",
                 "-C", str(self.target_root), "."
             ], check=False)
+            if result.returncode != 0 or not partial_seed.is_file() or partial_seed.stat().st_size == 0:
+                raise APTManagerError("Could not create rootfs seed tarball")
+            partial_seed.replace(seed_cache)
+            checksum = self._sha256(seed_cache)
+            seed_cache.with_name(f"{seed_cache.name}.sha256").write_text(
+                f"{checksum}  {seed_cache.name}\n", encoding="utf-8"
+            )
             logger.info(f"Successfully saved seed tarball cache ({seed_cache.stat().st_size} bytes)")
         except Exception as e:
             logger.warning(f"Could not save seed tarball cache: {e}")
@@ -265,7 +361,7 @@ class APTManager:
         cmd = ["apt-get", "install", "-y"] + real_pkgs
         res = self.chroot.run_in_chroot(cmd, check=False, env={"DEBIAN_FRONTEND": "noninteractive", "NEEDRESTART_MODE": "a"})
         if res.returncode != 0:
-            logger.warning(f"APT package installation returned code {res.returncode}")
+            raise APTManagerError(f"APT package installation failed with exit code {res.returncode}")
 
         self.sync_cache_from_target()
 
@@ -288,8 +384,10 @@ class APTManager:
         real_pkgs = [p for p in packages if p]
         if real_pkgs:
             logger.info(f"📦 Downloading {len(real_pkgs)} offline packages into {dest_dir}...")
-            cmd = ["apt-get", "install", "-y", "--download-only", "-o", f"Dir::Cache::Archives={dest_dir}"] + real_pkgs
-            self.chroot.run_in_chroot(cmd, check=False, env={"DEBIAN_FRONTEND": "noninteractive"})
+            cmd = ["apt-get", "install", "-y", "--download-only"] + real_pkgs
+            result = self.chroot.run_in_chroot(cmd, check=False, env={"DEBIAN_FRONTEND": "noninteractive"})
+            if result.returncode != 0:
+                raise APTManagerError(f"Offline package download failed with exit code {result.returncode}")
 
             # Copy any packages from target archive cache
             target_archives = self.target_root / "var" / "cache" / "apt" / "archives"
@@ -336,7 +434,6 @@ class APTManager:
             "Component: main\n"
             "Origin: Offline-ISO\n"
             "Label: Offline ISO Repository\n"
-            "Architecture: amd64\n"
+            f"Architecture: {self.config.get('dpkg_arch', 'amd64')}\n"
         )
         release_file.write_text(release_content)
-

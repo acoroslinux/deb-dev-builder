@@ -1,8 +1,15 @@
 {
-    "name": "RockPro64",
+  "name": "RockPro64",
+  "status": "experimental",
+  "notes": "Requires board-specific U-Boot binaries in the target rootfs.",
     "architecture": "aarch64",
     "bootloader": {
         "type": "u-boot-rockpro64"
     },
+    "partition_start_mib": 16,
+    "boot_artifacts": [
+        {"source": "/boot/u-boot/idbloader.img", "offset_kib": 32, "required": true},
+        {"source": "/boot/u-boot/u-boot.itb", "offset_kib": 8192, "required": true}
+    ],
     "output_format": "img"
 }

@@ -4,6 +4,12 @@ from deb_dev_builder.core.chroot_manager import ChrootManager
 from deb_dev_builder.core.apt_manager import APTManager
 
 class TestAPTManager:
+    def test_default_cache_is_kept_under_the_workspace(self, tmp_path):
+        target_root = tmp_path / "workdir" / "amd64" / "chroot"
+        chroot = ChrootManager(target_root, mode="mock", arch="amd64")
+        cache_dir = APTManager(chroot, config={}).resolve_cache_dir()
+        assert cache_dir == tmp_path / "workdir" / "cache" / "amd64" / "apt"
+
     def test_mock_bootstrap(self, tmp_path):
         target_root = tmp_path / "chroot"
         chroot = ChrootManager(target_root, mode="mock")
@@ -95,4 +101,3 @@ class TestAPTManager:
         assert result.exists()
         assert (dest_dir / "Packages.gz").exists()
         assert (dest_dir / "Release").exists()
-

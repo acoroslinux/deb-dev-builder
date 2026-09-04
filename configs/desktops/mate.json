@@ -1,5 +1,6 @@
 {
   "desktop": "mate",
   "display_manager": "lightdm",
+  "session_type": "x11",
   "packages": ["mate-desktop-environment", "lightdm"]
 }

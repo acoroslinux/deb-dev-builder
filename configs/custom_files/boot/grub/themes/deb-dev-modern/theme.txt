@@ -1,0 +1,19 @@
+# Elegant Modern Dark Theme for GRUB2
+title-text: ""
+desktop-image: "background.png"
+desktop-color: "#12101a"
+
++ boot_menu {
+  left = 20%
+  top = 35%
+  width = 60%
+  height = 40%
+  item_font = "Unifont Regular 16"
+  selected_item_font = "Unifont Regular 16"
+  item_color = "#8b949e"
+  selected_item_color = "#ffffff"
+  selected_item_bg_color = "#d70a53"
+  item_height = 24
+  item_padding = 4
+  item_spacing = 8
+}

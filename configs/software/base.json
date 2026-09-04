@@ -1,8 +1,5 @@
 {
   "packages": [
-    "live-boot",
-    "live-config",
-    "live-config-systemd",
     "user-setup",
     "sudo",
     "bash",
@@ -13,11 +10,6 @@
     "wget",
     "zstd",
     "locales",
-    "ca-certificates",
-    "firmware-linux-free",
-    "firmware-linux-nonfree",
-    "firmware-realtek",
-    "firmware-misc-nonfree",
-    "firmware-iwlwifi"
+    "ca-certificates"
   ]
 }

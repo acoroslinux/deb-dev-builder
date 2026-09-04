@@ -1,5 +1,5 @@
 {
-  "packages": ["syslinux", "isolinux"],
+  "packages": ["syslinux-common", "isolinux"],
   "bootloader": {
     "type": "syslinux"
   }

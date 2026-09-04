@@ -33,6 +33,7 @@ build_host/
 .pytest_cache/
 .coverage
 htmlcov/
+docs/_build/
 .mypy_cache/
 .ruff_cache/
 

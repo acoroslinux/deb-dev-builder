@@ -2,9 +2,34 @@
   "system": {
     "hostname": "debian-modern",
     "timezone": "UTC",
+    "locale": "pt_PT.UTF-8",
     "iso_label": "DEBIAN-MODERN"
   },
   "boot": {
-    "kernel_params": "boot=live components quiet splash"
+    "kernel_params": "boot=live components union=overlay"
+  },
+  "hooks": {
+    "enabled": true,
+    "directory": "hooks",
+    "chroot_directory": "chroot"
+  },
+  "cleanup": {
+    "enabled": true,
+    "apt_lists": true,
+    "apt_archives": true,
+    "logs": true,
+    "temporary": true,
+    "caches": true,
+    "bytecode": true,
+    "builder_metadata": true,
+    "machine_identity": true
+  },
+  "toolchain": {
+    "backend": "isolated-oci",
+    "oci_registry": "https://registry-1.docker.io",
+    "oci_repository": "library/debian",
+    "oci_reference": "trixie",
+    "tarball_url": "",
+    "tarball_sha256": ""
   }
 }

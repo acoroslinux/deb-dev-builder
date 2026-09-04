@@ -1,9 +1,9 @@
 {
   "distro": "debian-14",
-  "distro_name": "Debian GNU/Linux 13 (Forky)",
+  "distro_name": "Debian GNU/Linux 14 (Forky Testing)",
+  "base_distro": "debian",
+  "system": {"hostname": "debian-live", "iso_label": "DEBIAN_TESTING"},
   "suite": "forky",
   "mirror": "http://deb.debian.org/debian",
-  "security_mirror": "http://security.debian.org/debian-security",
-  "updates_mirror": "http://deb.debian.org/debian",
-  "components": ["main", "contrib", "non-free-firmware"]
+  "components": ["main", "contrib", "non-free", "non-free-firmware"]
 }

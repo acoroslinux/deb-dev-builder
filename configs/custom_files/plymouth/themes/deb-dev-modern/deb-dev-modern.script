@@ -1,0 +1,31 @@
+// Modern Universal Smooth Plymouth Script
+wallpaper_image = Image("splash.png");
+screen_width = Window.GetWidth();
+screen_height = Window.GetHeight();
+
+image_ratio = wallpaper_image.GetWidth() / wallpaper_image.GetHeight();
+screen_ratio = screen_width / screen_height;
+
+if (image_ratio > screen_ratio) {
+    scale_factor = screen_height / wallpaper_image.GetHeight();
+} else {
+    scale_factor = screen_width / wallpaper_image.GetWidth();
+}
+
+scaled_width = wallpaper_image.GetWidth() * scale_factor;
+scaled_height = wallpaper_image.GetHeight() * scale_factor;
+
+resized_wallpaper_image = wallpaper_image.Scale(scaled_width, scaled_height);
+wallpaper_sprite = Sprite(resized_wallpaper_image);
+wallpaper_sprite.SetX(screen_width / 2 - scaled_width / 2);
+wallpaper_sprite.SetY(screen_height / 2 - scaled_height / 2);
+wallpaper_sprite.SetZ(-100);
+wallpaper_sprite.SetOpacity(0);
+
+fun refresh_callback () {
+    opacity = wallpaper_sprite.GetOpacity();
+    if (opacity < 1) {
+        wallpaper_sprite.SetOpacity(opacity + 0.05);
+    }
+}
+Plymouth.SetRefreshFunction(refresh_callback);

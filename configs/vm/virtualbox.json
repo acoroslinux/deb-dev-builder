@@ -1,0 +1,7 @@
+{
+  "name": "Oracle VirtualBox",
+  "output_format": "vdi",
+  "firmware": "uefi",
+  "supported_architectures": ["amd64"],
+  "packages": []
+}

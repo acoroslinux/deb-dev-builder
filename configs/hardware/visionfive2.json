@@ -1,5 +1,7 @@
 {
-    "name": "VisionFive 2",
+  "name": "VisionFive 2",
+  "status": "experimental",
+  "notes": "Requires working OpenSBI/U-Boot firmware in SPI flash to load the generated extlinux boot partition.",
     "architecture": "riscv64",
     "bootloader": {
         "type": "u-boot-visionfive2"

@@ -1,0 +1,7 @@
+{
+  "name": "VMware",
+  "output_format": "vmdk",
+  "firmware": "uefi",
+  "supported_architectures": ["amd64", "aarch64"],
+  "packages": ["open-vm-tools"]
+}

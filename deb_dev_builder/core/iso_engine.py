@@ -4,21 +4,25 @@ import shutil
 import subprocess
 import time
 import hashlib
+import tarfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Dict, Tuple, Any
 import logging
 from deb_dev_builder.core.toolchain_manager import ToolchainManager
-from deb_dev_builder.core.path_utils import resolve_from_project
+from deb_dev_builder.core.path_utils import resolve_from_project, resolve_output_path
 
 logger = logging.getLogger("iso_engine")
 
 _ARCH_EFI_MAP = {
     "amd64":   ("x86_64-efi",  "BOOTX64.EFI"),
     "x86_64":  ("x86_64-efi",  "BOOTX64.EFI"),
-    "i386":    ("x86_64-efi",  "BOOTX64.EFI"),
-    "i686":    ("x86_64-efi",  "BOOTX64.EFI"),
+    "i386":    ("i386-efi",    "BOOTIA32.EFI"),
+    "i686":    ("i386-efi",    "BOOTIA32.EFI"),
     "arm64":   ("arm64-efi",   "BOOTAA64.EFI"),
     "aarch64": ("arm64-efi",   "BOOTAA64.EFI"),
+    "armhf":   ("arm-efi",     "BOOTARM.EFI"),
     "riscv64": ("riscv64-efi", "BOOTRISCV64.EFI"),
 }
 
@@ -39,11 +43,10 @@ class ISOEngine:
         self.arch = config.get("architecture", "amd64")
 
     def _resolve_output_path(self, extension: str) -> Path:
-        requested = Path(self.output_name)
-        candidate = requested if requested.suffix == f".{extension}" else requested.with_suffix(f".{extension}")
-        if candidate.is_absolute() or candidate.parent != Path("."):
-            return candidate
-        return resolve_from_project("output") / candidate
+        return resolve_output_path(self.output_name, extension)
+
+    def _build_host_root(self) -> Path:
+        return Path(getattr(self.toolchain, "build_host_dir", self.workdir.parent / "build_host"))
 
     def get_bootloader_type(self) -> str:
         bootloader = self.config.get("bootloader", {})
@@ -72,7 +75,7 @@ class ISOEngine:
         return self.get_bootloader_type() in {"grub2-hybrid", "grub2-uefi"}
 
     def should_use_grub_bios(self) -> bool:
-        return self.get_bootloader_type() in {"grub2-hybrid", "grub2-bios"}
+        return self.arch in _BIOS_ARCHES and self.get_bootloader_type() in {"grub2-hybrid", "grub2-bios"}
 
     def should_use_syslinux(self) -> bool:
         return self.get_bootloader_type() == "syslinux"
@@ -101,10 +104,10 @@ class ISOEngine:
         iso_label = self._get_iso_label()
         kernel_params = self._get_kernel_params()
         desktop = str(self.config.get("desktop", "xfce")).upper()
-        distro = str(self.config.get("distro", "Debian")).title()
+        distro = str(self.config.get("distro_name", self.config.get("distro", "Debian")))
         arch = self.arch
         keymap = self.config.get("keymap", "us")
-        locale = self.config.get("locale", "en_US.UTF-8")
+        locale = self.config.get("locale", self.config.get("system", {}).get("locale", "en_US.UTF-8"))
         live_user = self.config.get("live_user", "liveuser")
         if isinstance(live_user, dict):
             live_user = live_user.get("name", "liveuser")
@@ -123,6 +126,113 @@ class ISOEngine:
             "@@LIVE_USER@@": live_user,
             "@@SPLASHIMAGE@@": "splash.png"
         }
+
+    def _installer_netboot_url(self, relative: str = "") -> str:
+        if self.config.get("base_distro") != "debian":
+            raise ISOEngineError("Official Debian Installer artifacts require a Debian distro profile")
+        mirror = str(self.config.get("installer_mirror") or self.config.get("mirror") or "https://deb.debian.org/debian").rstrip("/")
+        suite = self.config.get("suite")
+        arch = self.config.get("dpkg_arch", self.arch)
+        if not suite or not arch:
+            raise ISOEngineError("Debian Installer requires suite and dpkg_arch configuration")
+        base = f"{mirror}/dists/{suite}/main/installer-{arch}/current/images/netboot"
+        return f"{base}/{relative.lstrip('/')}" if relative else base
+
+    def _download_installer_file(self, relative: str, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with urllib.request.urlopen(self._installer_netboot_url(relative), timeout=120) as response:
+                with destination.open("wb") as output:
+                    shutil.copyfileobj(response, output)
+        except (OSError, urllib.error.URLError) as exc:
+            raise ISOEngineError(f"Could not download Debian Installer artifact {relative}: {exc}") from exc
+        if not destination.is_file() or destination.stat().st_size == 0:
+            raise ISOEngineError(f"Downloaded Debian Installer artifact is empty: {relative}")
+
+    def _stage_debian_installer(self, install_dir: Path) -> None:
+        """Stage genuine d-i text and GTK kernels/initrds for the selected suite."""
+        arch = self.config.get("dpkg_arch", self.arch)
+        install_gtk_dir = install_dir / "gtk"
+        install_dir.mkdir(parents=True, exist_ok=True)
+        install_gtk_dir.mkdir(parents=True, exist_ok=True)
+        text_targets = (
+            (f"debian-installer/{arch}/linux", install_dir / "vmlinuz"),
+            (f"debian-installer/{arch}/initrd.gz", install_dir / "initrd.gz"),
+        )
+        graphical_targets = (
+            (f"gtk/debian-installer/{arch}/linux", install_gtk_dir / "vmlinuz"),
+            (f"gtk/debian-installer/{arch}/initrd.gz", install_gtk_dir / "initrd.gz"),
+        )
+        if self.mode == "mock":
+            for _, destination in text_targets + graphical_targets:
+                destination.touch()
+            self.config["di_graphical"] = True
+            return
+        for relative, destination in text_targets:
+            self._download_installer_file(relative, destination)
+        try:
+            for relative, destination in graphical_targets:
+                self._download_installer_file(relative, destination)
+            self.config["di_graphical"] = True
+        except ISOEngineError as exc:
+            logger.warning("Graphical Debian Installer is unavailable for %s: %s", arch, exc)
+            shutil.rmtree(install_gtk_dir, ignore_errors=True)
+            self.config["di_graphical"] = False
+
+    def _resolve_preseed_files(self):
+        preseed_dir = resolve_from_project("configs/debian-installer")
+        requested = self.config.get("preseed")
+        desktop = self.config.get("desktop")
+        candidates = []
+        if requested:
+            requested_path = Path(requested)
+            candidates = [
+                requested_path,
+                preseed_dir / f"{requested}.cfg",
+                preseed_dir / f"preseed-{requested}.cfg",
+                preseed_dir / str(requested),
+            ]
+        elif desktop:
+            candidates = [preseed_dir / f"preseed-{desktop}.cfg"]
+        else:
+            candidates = [preseed_dir / "preseed-server.cfg", preseed_dir / "preseed.cfg"]
+        return [path for path in candidates if path.is_file()][:1]
+
+    def build_netboot_archive(self) -> Path:
+        """Build a complete official d-i PXE tree with optional local preseed files."""
+        output = self._resolve_output_path(".netboot.tar.gz")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if self.mode == "mock":
+            output.touch()
+            return output
+
+        staging = self.workdir / "netboot_root"
+        archive = self.workdir / "debian-installer-netboot.tar.gz"
+        if staging.exists():
+            shutil.rmtree(staging)
+        staging.mkdir(parents=True)
+        self._download_installer_file("netboot.tar.gz", archive)
+        try:
+            with tarfile.open(archive, "r:gz") as source:
+                source.extractall(staging, filter="data")
+        except (OSError, tarfile.TarError) as exc:
+            raise ISOEngineError(f"Invalid Debian Installer netboot archive: {exc}") from exc
+
+        preseed_files = self._resolve_preseed_files()
+        if preseed_files:
+            shutil.copy2(preseed_files[0], staging / "preseed.cfg")
+        installer_files = resolve_from_project("configs/debian-installer")
+        for name in ("early_command.sh", "late_command.sh"):
+            source = installer_files / name
+            if source.is_file():
+                shutil.copy2(source, staging / name)
+
+        with tarfile.open(output, "w:gz") as result:
+            for path in sorted(staging.rglob("*")):
+                result.add(path, arcname=path.relative_to(staging), recursive=False)
+        if not output.is_file() or output.stat().st_size == 0:
+            raise ISOEngineError(f"Netboot archive was not created: {output}")
+        return output
 
     def _find_kernel_and_initramfs(self) -> Tuple[str, str]:
         boot_dir = self.target_root / "boot"
@@ -179,7 +289,7 @@ class ISOEngine:
         # 1. Search for i386-pc directory with cdboot.img (exact live-build architecture)
         search_roots = [
             self.target_root,
-            self.workdir / "build_host",
+            self._build_host_root(),
             Path("/")
         ]
         i386_dir = None
@@ -305,10 +415,15 @@ class ISOEngine:
         # Copy EFI modules to /boot/grub/<platform> on ISO staging (exact live-build requirement)
         search_roots = [
             self.target_root,
-            self.workdir / "build_host",
+            self._build_host_root(),
             Path("/")
         ]
-        for efi_platform in ["x86_64-efi", "i386-efi"]:
+        primary_platform, primary_filename = _ARCH_EFI_MAP.get(self.arch, ("x86_64-efi", "BOOTX64.EFI"))
+        efi_targets = [(primary_platform, primary_filename)]
+        if self.arch in {"amd64", "x86_64"}:
+            efi_targets.append(("i386-efi", "BOOTIA32.EFI"))
+
+        for efi_platform, _ in efi_targets:
             for r in search_roots:
                 src_efi_dir = r / "usr" / "lib" / "grub" / efi_platform
                 if src_efi_dir.exists():
@@ -341,7 +456,7 @@ class ISOEngine:
                     )
                     break
 
-        for fmt, boot_filename in [("x86_64-efi", "BOOTX64.EFI"), ("i386-efi", "BOOTIA32.EFI")]:
+        for fmt, boot_filename in efi_targets:
             mod_dir = None
             for r in search_roots:
                 candidate = r / "usr" / "lib" / "grub" / fmt
@@ -453,10 +568,10 @@ class ISOEngine:
             self.target_root / "usr" / "share" / "syslinux",
             self.target_root / "usr" / "lib" / "syslinux" / "bios",
             self.target_root / "usr" / "lib" / "syslinux",
-            self.workdir / "build_host" / "usr" / "lib" / "ISOLINUX",
-            self.workdir / "build_host" / "usr" / "lib" / "syslinux" / "modules" / "bios",
-            self.workdir / "build_host" / "usr" / "share" / "syslinux",
-            self.workdir / "build_host" / "usr" / "lib" / "syslinux" / "bios",
+            self._build_host_root() / "usr" / "lib" / "ISOLINUX",
+            self._build_host_root() / "usr" / "lib" / "syslinux" / "modules" / "bios",
+            self._build_host_root() / "usr" / "share" / "syslinux",
+            self._build_host_root() / "usr" / "lib" / "syslinux" / "bios",
             Path("/usr/lib/ISOLINUX"),
             Path("/usr/lib/syslinux/modules/bios"),
             Path("/usr/share/syslinux"),
@@ -508,16 +623,25 @@ class ISOEngine:
                     f"  KERNEL /live/vmlinuz\n"
                     f"  APPEND initrd=/live/initrd.img {kernel_params} nomodeset xci586 noapic acpi=off\n"
                 )
+            if self.config.get("di_mode") == "netinstall":
+                syslinux_cfg = "UI vesamenu.c32\nPROMPT 0\nTIMEOUT 50\n"
             if self.config.get("with_debian_installer"):
                 syslinux_cfg += (
                     "\nLABEL install\n"
                     "  MENU LABEL ^Install (Modo Texto)\n"
                     "  KERNEL /install/vmlinuz\n"
-                    "  APPEND initrd=/install/initrd.gz vga=788 --- quiet\n\n"
+                    "  APPEND initrd=/install/initrd.gz vga=788 --- quiet\n"
+                )
+                if self.config.get("di_graphical"):
+                    syslinux_cfg += (
+                    "\n"
                     "LABEL install-gtk\n"
-                    "  MENU LABEL ^Graphical Install (Modo Gráfico)\n"
+                    "  MENU LABEL ^Graphical Install\n"
                     "  KERNEL /install/gtk/vmlinuz\n"
-                    "  APPEND initrd=/install/gtk/initrd.gz video=vesa:ywrap,mtrr vga=788 --- quiet\n\n"
+                    "  APPEND initrd=/install/gtk/initrd.gz video=vesa:ywrap,mtrr vga=788 --- quiet\n"
+                    )
+                syslinux_cfg += (
+                    "\n"
                     "LABEL install-auto\n"
                     "  MENU LABEL ^Automated Install (Preseed Server)\n"
                     "  KERNEL /install/vmlinuz\n"
@@ -529,22 +653,31 @@ class ISOEngine:
             shutil.rmtree(isolinux_target, ignore_errors=True)
 
     def build_iso(self) -> Path:
+        installer_only = self.config.get("di_mode") == "netinstall"
+        if self.iso_staging.exists():
+            shutil.rmtree(self.iso_staging)
         self.iso_staging.mkdir(parents=True, exist_ok=True)
-        (self.iso_staging / "live").mkdir(parents=True, exist_ok=True)
+        if not installer_only:
+            (self.iso_staging / "live").mkdir(parents=True, exist_ok=True)
         (self.iso_staging / "isolinux").mkdir(parents=True, exist_ok=True)
         (self.iso_staging / "boot" / "grub").mkdir(parents=True, exist_ok=True)
 
-        kernel, initramfs = self._find_kernel_and_initramfs()
-        if self.mode != "mock":
-            src_kernel = self.target_root / "boot" / kernel
-            src_initramfs = self.target_root / "boot" / initramfs
-            if src_kernel.exists():
-                shutil.copy2(src_kernel, self.iso_staging / "live" / "vmlinuz")
-            if src_initramfs.exists():
-                shutil.copy2(src_initramfs, self.iso_staging / "live" / "initrd.img")
+        if not installer_only:
+            kernel, initramfs = self._find_kernel_and_initramfs()
+            if self.mode != "mock":
+                src_kernel = self.target_root / "boot" / kernel
+                src_initramfs = self.target_root / "boot" / initramfs
+                if src_kernel.exists():
+                    shutil.copy2(src_kernel, self.iso_staging / "live" / "vmlinuz")
+                if src_initramfs.exists():
+                    shutil.copy2(src_initramfs, self.iso_staging / "live" / "initrd.img")
+                if not (self.iso_staging / "live" / "vmlinuz").is_file():
+                    raise ISOEngineError(f"Kernel not found below {self.target_root / 'boot'}")
+                if not (self.iso_staging / "live" / "initrd.img").is_file():
+                    raise ISOEngineError(f"Initramfs not found below {self.target_root / 'boot'}")
 
-        squashfs_path = self.iso_staging / "live" / "filesystem.squashfs"
-        self._create_squashfs(self.target_root, squashfs_path)
+            squashfs_path = self.iso_staging / "live" / "filesystem.squashfs"
+            self._create_squashfs(self.target_root, squashfs_path)
 
         iso_label = self._get_iso_label()
         kernel_params = self._get_kernel_params()
@@ -606,6 +739,8 @@ class ISOEngine:
                 "    initrd /live/initrd.img\n"
                 "}\n"
             )
+        if installer_only:
+            grub_cfg_text = "source /boot/grub/config.cfg\n"
 
         # 3. Load loopback.cfg from template if available
         loopback_template = resolve_from_project("configs/boot/templates/loopback.cfg.in")
@@ -619,48 +754,10 @@ class ISOEngine:
         if self.config.get("with_debian_installer"):
             install_dir = self.iso_staging / "install"
             install_gtk_dir = install_dir / "gtk"
-            install_dir.mkdir(parents=True, exist_ok=True)
-            install_gtk_dir.mkdir(parents=True, exist_ok=True)
-
-            vmlinuz_src = self.iso_staging / "live" / "vmlinuz"
-            initrd_src = self.iso_staging / "live" / "initrd.img"
-
-            if vmlinuz_src.exists():
-                shutil.copy2(vmlinuz_src, install_dir / "vmlinuz")
-                shutil.copy2(vmlinuz_src, install_gtk_dir / "vmlinuz")
-            else:
-                (install_dir / "vmlinuz").touch()
-                (install_gtk_dir / "vmlinuz").touch()
-
-            if initrd_src.exists():
-                shutil.copy2(initrd_src, install_dir / "initrd.gz")
-                shutil.copy2(initrd_src, install_gtk_dir / "initrd.gz")
-            else:
-                (install_dir / "initrd.gz").touch()
-                (install_gtk_dir / "initrd.gz").touch()
+            self._stage_debian_installer(install_dir)
 
             di_custom_dir = resolve_from_project("configs/debian-installer")
-            preseed_files = []
-
-            desktop_profile = self.config.get("desktop")
-            custom_preseed_arg = self.config.get("preseed")
-
-            if custom_preseed_arg:
-                arg_path = Path(custom_preseed_arg)
-                if arg_path.exists():
-                    preseed_files.append(arg_path)
-                elif (di_custom_dir / f"{custom_preseed_arg}.cfg").exists():
-                    preseed_files.append(di_custom_dir / f"{custom_preseed_arg}.cfg")
-                elif (di_custom_dir / f"preseed-{custom_preseed_arg}.cfg").exists():
-                    preseed_files.append(di_custom_dir / f"preseed-{custom_preseed_arg}.cfg")
-                elif (di_custom_dir / custom_preseed_arg).exists():
-                    preseed_files.append(di_custom_dir / custom_preseed_arg)
-            elif desktop_profile and (di_custom_dir / f"preseed-{desktop_profile}.cfg").exists():
-                preseed_files.append(di_custom_dir / f"preseed-{desktop_profile}.cfg")
-            elif not desktop_profile and (di_custom_dir / "preseed-server.cfg").exists():
-                preseed_files.append(di_custom_dir / "preseed-server.cfg")
-            elif di_custom_dir.exists():
-                preseed_files = sorted([f for f in di_custom_dir.glob("*.cfg") if f.is_file()])
+            preseed_files = self._resolve_preseed_files()
 
             preseed_blocks = []
             for pf in preseed_files:
@@ -686,7 +783,7 @@ class ISOEngine:
                     (install_dir / "late_command.sh").chmod(0o755)
                 except Exception:
                     pass
-                preseed_content += "\nd-i preseed/late_command string in-target /bin/sh /cdrom/install/late_command.sh\n"
+                preseed_content += "\nd-i preseed/late_command string /bin/sh /cdrom/install/late_command.sh\n"
 
             if (di_custom_dir / "splash.png").exists():
                 shutil.copy2(di_custom_dir / "splash.png", install_gtk_dir / "splash.png")
@@ -704,12 +801,16 @@ class ISOEngine:
                 "\nmenuentry 'Install (Modo Texto)' {\n"
                 "    linux /install/vmlinuz vga=788 --- quiet\n"
                 "    initrd /install/initrd.gz\n"
-                "}\n\n"
-                "menuentry 'Graphical Install (Modo Gráfico)' {\n"
+                "}\n"
+            )
+            if self.config.get("di_graphical"):
+                grub_cfg_text += (
+                "\n"
+                "menuentry 'Graphical Install' {\n"
                 "    linux /install/gtk/vmlinuz video=vesa:ywrap,mtrr vga=788 --- quiet\n"
                 "    initrd /install/gtk/initrd.gz\n"
                 "}\n"
-            )
+                )
 
             if (install_dir / "preseed.cfg").exists():
                 grub_cfg_text += (
@@ -718,41 +819,6 @@ class ISOEngine:
                     "    initrd /install/initrd.gz\n"
                     "}\n"
                 )
-
-        di_mode = self.config.get("di_mode", "live")
-        if di_mode == "netboot":
-            logger.info("📡 Generating Debian-Installer PXE/TFTP Network Boot Tree...")
-            tftp_dir = self.iso_staging / "tftpboot" / "debian-installer" / self.arch
-            pxe_cfg_dir = self.iso_staging / "tftpboot" / "pxelinux.cfg"
-            tftp_dir.mkdir(parents=True, exist_ok=True)
-            pxe_cfg_dir.mkdir(parents=True, exist_ok=True)
-
-            install_vmlinuz = self.iso_staging / "install" / "vmlinuz"
-            install_initrd = self.iso_staging / "install" / "initrd.gz"
-
-            if install_vmlinuz.exists():
-                shutil.copy2(install_vmlinuz, tftp_dir / "vmlinuz")
-            else:
-                (tftp_dir / "vmlinuz").touch()
-
-            if install_initrd.exists():
-                shutil.copy2(install_initrd, tftp_dir / "initrd.gz")
-            else:
-                (tftp_dir / "initrd.gz").touch()
-
-            (pxe_cfg_dir / "default").write_text(
-                "DEFAULT install\n"
-                "PROMPT 0\n"
-                "TIMEOUT 50\n\n"
-                "LABEL install\n"
-                f"  KERNEL debian-installer/{self.arch}/vmlinuz\n"
-                f"  APPEND initrd=debian-installer/{self.arch}/initrd.gz vga=788 --- quiet\n"
-            )
-
-            netboot_tar = resolve_from_project(f"output/{self.output_name}-netboot-tftp.tar.gz")
-            netboot_tar.parent.mkdir(parents=True, exist_ok=True)
-            subprocess.run(["tar", "-czf", str(netboot_tar), "-C", str(self.iso_staging / "tftpboot"), "."], check=False)
-            logger.info(f"Successfully generated Netboot TFTP archive: {netboot_tar}")
 
         # 1. Generate /.disk/info for live-boot media detection BEFORE generating bootloaders
         disk_dir = self.iso_staging / ".disk"
@@ -775,14 +841,17 @@ class ISOEngine:
         # Copy unicode.pf2 font if available
         for font_candidate in [
             self.target_root / "usr" / "share" / "grub" / "unicode.pf2",
-            self.workdir / "build_host" / "usr" / "share" / "grub" / "unicode.pf2",
+            self._build_host_root() / "usr" / "share" / "grub" / "unicode.pf2",
             Path("/usr/share/grub/unicode.pf2"),
         ]:
             if font_candidate.exists():
                 shutil.copy2(font_candidate, self.iso_staging / "boot" / "grub" / "unicode.pf2")
                 break
 
-        for platform_dir in [self.iso_staging / "boot" / "grub" / "x86_64-efi", self.iso_staging / "boot" / "grub" / "i386-efi"]:
+        efi_platform, _ = _ARCH_EFI_MAP.get(self.arch, ("x86_64-efi", "BOOTX64.EFI"))
+        platforms = [efi_platform] + (["i386-efi"] if self.arch in {"amd64", "x86_64"} else [])
+        for platform in platforms:
+            platform_dir = self.iso_staging / "boot" / "grub" / platform
             platform_dir.mkdir(parents=True, exist_ok=True)
             (platform_dir / "grub.cfg").write_text(
                 "if [ x$grub_platform == xefi -a x$lockdown != xy ] ; then\n"
@@ -798,6 +867,14 @@ class ISOEngine:
             bios_core = self.generate_grub_bios_core()
         if self.should_use_grub_efi():
             self.generate_grub_efi_image()
+        if self.mode != "mock":
+            if self.should_use_syslinux() and not (self.iso_staging / "isolinux" / "isolinux.bin").is_file():
+                raise ISOEngineError("Syslinux was selected but isolinux.bin was not found")
+            if self.should_use_grub_bios() and (not bios_core.is_file() or bios_core.stat().st_size == 0):
+                raise ISOEngineError("GRUB BIOS was selected but its El Torito image could not be built")
+            efi_image = self.iso_staging / "boot" / "grub" / "efiboot.img"
+            if self.should_use_grub_efi() and (not efi_image.is_file() or efi_image.stat().st_size == 0):
+                raise ISOEngineError("GRUB UEFI was selected but its EFI system image could not be built")
 
         # 2. Generate live/filesystem.packages for Calamares installer (live-build standard)
         try:
@@ -840,7 +917,7 @@ class ISOEngine:
         else:
             search_roots = [
                 self.target_root,
-                self.workdir / "build_host",
+                self._build_host_root(),
                 Path("/")
             ]
 
@@ -918,20 +995,24 @@ class ISOEngine:
             ])
 
             logger.info("Executing xorriso to create live-build compliant ISO: %s", " ".join(xorriso_args))
-            self.toolchain.run_tool("xorriso", xorriso_args, check=False)
+            self.toolchain.run_tool("xorriso", xorriso_args, check=True)
+            if not iso_path.is_file() or iso_path.stat().st_size == 0:
+                raise ISOEngineError(f"xorriso did not create a usable ISO: {iso_path}")
 
         return iso_path
 
     def build_tarball(self) -> Path:
-        tar_path = resolve_from_project(f"output/stage3_seeds/{self.output_name}.tar.xz")
+        tar_path = resolve_output_path(self.output_name, ".tar.xz")
         tar_path.parent.mkdir(parents=True, exist_ok=True)
         if self.mode == "mock":
             tar_path.touch()
         else:
-            subprocess.run([
-                "tar", "cJpf", str(tar_path),
+            self.toolchain.run_tool("tar", [
+                "cJpf", str(tar_path),
                 "--exclude=./proc/*", "--exclude=./sys/*", "--exclude=./dev/*",
                 "--exclude=./tmp/*", "--exclude=./run/*",
                 "-C", str(self.target_root), "."
             ], check=True)
+            if not tar_path.is_file() or tar_path.stat().st_size == 0:
+                raise ISOEngineError(f"Rootfs tarball was not created: {tar_path}")
         return tar_path

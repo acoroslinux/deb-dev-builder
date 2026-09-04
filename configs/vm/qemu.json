@@ -1,0 +1,7 @@
+{
+  "name": "QEMU/KVM",
+  "output_format": "qcow2",
+  "firmware": "uefi",
+  "supported_architectures": ["amd64", "aarch64", "riscv64"],
+  "packages": ["qemu-guest-agent"]
+}

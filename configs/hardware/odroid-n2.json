@@ -1,5 +1,7 @@
 {
-    "name": "Odroid N2",
+  "name": "Odroid N2",
+  "status": "experimental",
+  "notes": "Requires a working board U-Boot installation in SPI or eMMC to load the generated extlinux boot partition.",
     "architecture": "aarch64",
     "bootloader": {
         "type": "u-boot-odroid-n2"

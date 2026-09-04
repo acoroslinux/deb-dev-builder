@@ -2,7 +2,7 @@
   "offline_repo_packages": [
     "gparted",
     "testdisk",
-    "ddrescue",
+    "gddrescue",
     "mc",
     "iotop",
     "nmap",

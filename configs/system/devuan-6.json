@@ -1,7 +1,11 @@
 {
   "distro": "devuan-6",
   "distro_name": "Devuan GNU+Linux 6 (Excalibur)",
+  "base_distro": "devuan",
+  "system": {"hostname": "devuan-live", "iso_label": "DEVUAN_LIVE"},
   "suite": "excalibur",
   "mirror": "http://deb.devuan.org/merged",
-  "components": ["main", "contrib", "non-free-firmware"]
+  "security_mirror": "http://deb.devuan.org/merged",
+  "updates_mirror": "http://deb.devuan.org/merged",
+  "components": ["main", "contrib", "non-free-firmware", "non-free"]
 }

@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -7,6 +8,8 @@ import logging
 from deb_dev_builder.core.chroot_manager import ChrootManager
 
 logger = logging.getLogger("customizer")
+
+_VALID_LOGIN_NAME = re.compile(r"^[a-z_][a-z0-9_-]{0,30}\$?$")
 
 class SystemCustomizer:
     def __init__(self, chroot: ChrootManager, config: Dict[str, Any]):
@@ -20,12 +23,17 @@ class SystemCustomizer:
         live_user_cfg = self.config.get("live_user", "liveuser")
         if isinstance(live_user_cfg, dict):
             live_user = live_user_cfg.get("name", "liveuser")
-            live_password = live_user_cfg.get("password", "live")
+            live_password = live_user_cfg.get("password")
             cfg_groups = live_user_cfg.get("groups", [])
         else:
             live_user = str(live_user_cfg)
-            live_password = "live"
+            live_password = None
             cfg_groups = []
+
+        if not isinstance(live_user, str) or not _VALID_LOGIN_NAME.fullmatch(live_user):
+            raise ValueError(f"Invalid live user name: {live_user!r}")
+        if live_password is not None and (not isinstance(live_password, str) or "\n" in live_password or "\r" in live_password):
+            raise ValueError("The live user password must be a single-line string")
 
         groups = self.config.get("live_groups") or cfg_groups or ["sudo", "audio", "video", "plugdev", "netdev", "users"]
         groups_str = ",".join(groups)
@@ -41,12 +49,21 @@ class SystemCustomizer:
             if create_user.returncode != 0:
                 self.chroot.run_in_chroot(["usermod", "-aG", "nopasswdlogin", str(live_user)], check=False)
 
-            self.chroot.run_in_chroot(f"echo '{live_user}:{live_password}' | chpasswd", check=False)
-            self.chroot.run_in_chroot(f"echo 'root:{live_password}' | chpasswd", check=False)
-            self.chroot.run_in_chroot(["passwd", "-u", str(live_user)], check=False)
-            self.chroot.run_in_chroot(["passwd", "-u", "root"], check=False)
+            # Accounts are locked by default. Autologin is configured through PAM,
+            # while an interactive password is only set when a profile explicitly
+            # supplies one. Never set or unlock the root account in a live image.
+            if live_password:
+                password_result = self.chroot.run_in_chroot(
+                    ["chpasswd"],
+                    check=False,
+                    input_data=f"{live_user}:{live_password}\n",
+                    text=True,
+                )
+                if password_result.returncode != 0:
+                    raise RuntimeError(f"Could not set password for live user {live_user}")
         except Exception:
             logger.exception("Could not fully configure live user %s", live_user)
+            raise
 
         sudoers_file = self.target_root / "etc" / "sudoers.d" / "live_user_nopasswd"
         sudoers_file.parent.mkdir(parents=True, exist_ok=True)
@@ -56,8 +73,9 @@ class SystemCustomizer:
     def configure_system_defaults(self):
         if self.chroot.mode == "mock":
             return
+        system_config = self.config.get("system", {})
         base = self.config.get("base_distro", "debian").lower()
-        hostname = self.config.get("hostname", f"{base}-modern")
+        hostname = self.config.get("hostname", system_config.get("hostname", f"{base}-modern"))
         etc_dir = self.target_root / "etc"
         etc_dir.mkdir(parents=True, exist_ok=True)
 
@@ -72,19 +90,28 @@ class SystemCustomizer:
         )
         hosts_file.write_text(hosts_content)
 
-        locale = self.config.get("locale", "en_US.UTF-8")
+        locale = self.config.get("locale", system_config.get("locale", "en_US.UTF-8"))
         loc_conf = etc_dir / "default" / "locale"
         loc_conf.parent.mkdir(parents=True, exist_ok=True)
         with open(loc_conf, "w") as f:
             f.write(f"LANG={locale}\n")
 
+        timezone = self.config.get("timezone", system_config.get("timezone", "UTC"))
+        (etc_dir / "timezone").write_text(f"{timezone}\n")
+        zoneinfo = self.target_root / "usr" / "share" / "zoneinfo" / timezone
+        localtime = etc_dir / "localtime"
+        if zoneinfo.exists():
+            if localtime.exists() or localtime.is_symlink():
+                localtime.unlink()
+            localtime.symlink_to(Path("/usr/share/zoneinfo") / timezone)
+
     def setup_services(self):
         if self.chroot.mode == "mock":
             return
-        services = self.config.get("services", [])
-        if isinstance(services, dict):
-            services = services.get("enable", [])
-        services_to_enable = list(services)
+        service_config = self.config.get("services", [])
+        services_to_enable = list(service_config.get("enable", [])) if isinstance(service_config, dict) else list(service_config)
+        services_to_disable = list(service_config.get("disable", [])) if isinstance(service_config, dict) else []
+        init_system = self.config.get("init_system", "systemd")
 
         for auto_svc in ["NetworkManager"]:
             if auto_svc not in services_to_enable:
@@ -92,11 +119,46 @@ class SystemCustomizer:
                 if unit.exists():
                     services_to_enable.append(auto_svc)
 
+        display_manager = self.config.get("display_manager")
+        if display_manager:
+            display_service = "gdm3" if display_manager == "gdm" else display_manager
+            if display_service not in services_to_enable:
+                services_to_enable.append(display_service)
+
         for svc in services_to_enable:
-            try:
-                self.chroot.run_in_chroot(["systemctl", "enable", str(svc)], check=False)
-            except Exception:
-                pass
+            if init_system == "systemd":
+                command = ["systemctl", "enable", str(svc)]
+            elif init_system == "openrc":
+                command = ["rc-update", "add", str(svc), "default"]
+            elif init_system == "sysvinit":
+                service_name = "network-manager" if svc == "NetworkManager" else str(svc)
+                command = ["update-rc.d", service_name, "defaults"]
+            elif init_system == "s6":
+                command = ["s6-rc-bundle-update", "add", "default", str(svc)]
+            elif init_system == "runit":
+                source = self.target_root / "etc" / "sv" / str(svc)
+                destination = self.target_root / "etc" / "service" / str(svc)
+                if source.exists() and not destination.exists():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.symlink_to(Path("..") / "sv" / str(svc))
+                continue
+            else:
+                logger.warning("Unknown init system %s; cannot enable %s", init_system, svc)
+                continue
+            result = self.chroot.run_in_chroot(command, check=False)
+            if result.returncode != 0:
+                logger.warning("Could not enable service %s with %s", svc, init_system)
+
+        for svc in services_to_disable:
+            if init_system == "systemd":
+                command = ["systemctl", "disable", str(svc)]
+            elif init_system == "openrc":
+                command = ["rc-update", "del", str(svc), "default"]
+            elif init_system == "sysvinit":
+                command = ["update-rc.d", str(svc), "disable"]
+            else:
+                continue
+            self.chroot.run_in_chroot(command, check=False)
 
     def _detect_desktop_session(self) -> str:
         session = self.config.get("desktop_session") or self.config.get("desktop")
@@ -252,10 +314,14 @@ class SystemCustomizer:
             return
         if not self.config.get("with_zram", True):
             return
-        zram_conf = self.target_root / "etc" / "systemd" / "zram-generator.conf"
+        if self.config.get("init_system", "systemd") == "systemd":
+            zram_conf = self.target_root / "etc" / "systemd" / "zram-generator.conf"
+            content = "[zram0]\nzram-size = ram / 2\ncompression-algorithm = zstd\n"
+        else:
+            zram_conf = self.target_root / "etc" / "default" / "zramswap"
+            content = "ALGO=zstd\nPERCENT=50\nPRIORITY=100\n"
         zram_conf.parent.mkdir(parents=True, exist_ok=True)
-        with open(zram_conf, "w") as f:
-            f.write("[zram0]\nzram-size = ram / 2\ncompression-algorithm = zstd\n")
+        zram_conf.write_text(content)
 
     def configure_flathub(self):
         if self.chroot.mode == "mock":
@@ -412,20 +478,6 @@ class SystemCustomizer:
         issue_file = etc_dir / "issue"
         issue_file.write_text(f"{pretty_name} \\r (\\l)\n\n")
 
-    def fix_home_permissions(self):
-        if self.chroot.mode == "mock":
-            return
-        live_user_cfg = self.config.get("live_user", "liveuser")
-        if isinstance(live_user_cfg, dict):
-            live_user = live_user_cfg.get("name", "liveuser")
-        else:
-            live_user = str(live_user_cfg)
-
-        user_home = self.target_root / "home" / live_user
-        if user_home.exists():
-            self.chroot.run_in_chroot(["chown", "-R", f"{live_user}:sudo", f"/home/{live_user}"], check=False)
-            self.chroot.run_in_chroot(["chmod", "0755", f"/home/{live_user}"], check=False)
-
     def configure_machine_id(self):
         if self.chroot.mode == "mock":
             return
@@ -566,7 +618,10 @@ class SystemCustomizer:
     def configure_locales(self):
         if self.chroot.mode == "mock":
             return
-        logger.info("🌐 Configuring locales (pt_PT.UTF-8 & en_US.UTF-8)...")
+        system_config = self.config.get("system", {})
+        locale = self.config.get("locale", system_config.get("locale", "pt_PT.UTF-8"))
+        locales = list(dict.fromkeys([locale, "en_US.UTF-8"]))
+        logger.info("🌐 Configuring locales: %s", ", ".join(locales))
         try:
             self.chroot.run_in_chroot(["apt-get", "install", "-y", "locales"], check=False)
             locale_gen = self.target_root / "etc" / "locale.gen"
@@ -574,7 +629,7 @@ class SystemCustomizer:
                 content = locale_gen.read_text()
                 new_lines = []
                 for line in content.splitlines():
-                    if "pt_PT.UTF-8" in line or "en_US.UTF-8" in line:
+                    if any(selected in line for selected in locales):
                         clean_line = line.lstrip("#").strip()
                         new_lines.append(clean_line)
                     else:
@@ -582,10 +637,10 @@ class SystemCustomizer:
                 locale_gen.write_text("\n".join(new_lines) + "\n")
             else:
                 locale_gen.parent.mkdir(parents=True, exist_ok=True)
-                locale_gen.write_text("pt_PT.UTF-8 UTF-8\nen_US.UTF-8 UTF-8\n")
+                locale_gen.write_text("".join(f"{selected} UTF-8\n" for selected in locales))
 
             self.chroot.run_in_chroot(["locale-gen"], check=False)
-            self.chroot.run_in_chroot(["update-locale", "LANG=pt_PT.UTF-8", "LC_ALL=pt_PT.UTF-8"], check=False)
+            self.chroot.run_in_chroot(["update-locale", f"LANG={locale}"], check=False)
         except Exception as e:
             logger.warning("Could not fully configure locales: %s", e)
 
@@ -617,7 +672,7 @@ class SystemCustomizer:
                 src = assets_dir / asset_name
                 if src.exists():
                     for target in paths:
-                        target_path = chroot.chroot_path / target.lstrip('/')
+                        target_path = chroot.target_root / target.lstrip('/')
                         target_path.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(src, target_path)
         except Exception as e:
@@ -656,6 +711,7 @@ class SystemCustomizer:
                     custom_files_list.append(entry)
 
         if not custom_files_list:
+            self.apply_theme_assets(self.chroot)
             return
 
         for entry in custom_files_list:

@@ -1,4 +1,5 @@
 {
+  "packages": ["bluez"],
   "services": {
     "enable": ["bluetooth"],
     "disable": []

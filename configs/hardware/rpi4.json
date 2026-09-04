@@ -1,8 +1,17 @@
 {
-    "name": "Raspberry Pi 4",
+  "name": "Raspberry Pi 4",
+  "status": "experimental",
+  "notes": "Requires Raspberry Pi firmware and U-Boot artifacts not supplied by this project.",
     "architecture": "aarch64",
     "bootloader": {
         "type": "u-boot-rpi4"
     },
+    "firmware_tree": "/boot/firmware",
+    "required_files": [
+        "/boot/firmware/config.txt",
+        "/boot/firmware/start4.elf",
+        "/boot/firmware/fixup4.dat",
+        "/boot/firmware/u-boot.bin"
+    ],
     "output_format": "img"
 }

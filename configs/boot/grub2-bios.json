@@ -1,5 +1,5 @@
 {
-  "packages": ["grub-pc"],
+  "packages": ["grub-pc-bin"],
   "bootloader": {
     "type": "grub2-bios"
   }

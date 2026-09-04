@@ -14,18 +14,24 @@ from pathlib import Path
 from deb_dev_builder.core.orchestrator import BuildOrchestrator, BuildOrchestratorError
 from deb_dev_builder.core.toolchain_manager import ToolchainManagerError
 from deb_dev_builder.core.apt_manager import APTManagerError
+from deb_dev_builder.core.chroot_manager import ChrootManagerError
 from deb_dev_builder.core.iso_engine import ISOEngineError
 from deb_dev_builder.core.disk_engine import DiskEngineError
 from deb_dev_builder.core.container_engine import ContainerEngineError
-from deb_dev_builder.core.config_loader import ConfigLoaderError
+from deb_dev_builder.core.config_loader import ConfigLoader, ConfigLoaderError
 from deb_dev_builder.core.path_utils import resolve_from_project
 
 
-def _available_profiles(config_root: Path, category: str):
+def _available_profiles(config_root: Path, category: str, profile_key: str = None):
     category_dir = config_root / category
     if not category_dir.exists() or not category_dir.is_dir():
         return []
-    return sorted([p.stem for p in category_dir.glob("*.json")])
+    profiles = []
+    loader = ConfigLoader(config_root=config_root)
+    for path in category_dir.glob("*.json"):
+        if profile_key is None or profile_key in loader.load_json(path):
+            profiles.append(path.stem)
+    return sorted(profiles)
 
 
 def _slugify_name(value: str, fallback: str) -> str:
@@ -73,6 +79,11 @@ def main():
         type=str,
         help="Hardware device profile (e.g., rpi4, pinebookpro)",
     )
+    parser.add_argument(
+        "--vm-profile",
+        type=str,
+        help="Virtual-machine profile (qemu, virtualbox, vmware, or hyperv).",
+    )
 
     parser.add_argument(
         "architecture",
@@ -119,22 +130,22 @@ def main():
     parser.add_argument(
         "--distro",
         type=str,
-        default="debian-12",
-        help="Distro profile (e.g. debian-12, debian-13, devuan-5, devuan-6). Default: debian-12",
+        default="debian-13",
+        help="Distro profile (e.g. debian-13, debian-14, devuan-6, devuan-5). Default: debian-13",
     )
 
     parser.add_argument(
         "--variant",
         type=str,
         default=None,
-        help="Variant profile (e.g. live, minimal, developer, cloud, hardened).",
+        help="Variant profile (live, minimal, server, or iot).",
     )
 
     parser.add_argument(
         "--init-system",
         type=str,
-        default="systemd",
-        help="Init system profile (systemd, sysvinit, openrc, runit, s6). Default: systemd",
+        default=None,
+        help="Init system profile (systemd, sysvinit, openrc, runit). Default: systemd for Debian, sysvinit for Devuan",
     )
 
     parser.add_argument(
@@ -157,10 +168,10 @@ def main():
         "-b",
         "--bootloader",
         type=str,
-        default="grub2-hybrid",
-        help="Bootloader profile (grub2-hybrid, grub2-uefi, grub2-bios, syslinux). Default: grub2-hybrid",
+        default=None,
+        help="Bootloader profile (grub2-hybrid, grub2-uefi, grub2-bios, syslinux). Default: hybrid on x86 ISO, UEFI otherwise",
     )
-    parser.add_argument("--fs-type", type=str, default="ext4", choices=["ext4", "btrfs", "xfs", 'f2fs'], help="Root filesystem type (ext4, btrfs, xfs). Default: ext4")
+    parser.add_argument("--fs-type", type=str, default="ext4", choices=["ext4", "btrfs", "xfs", "f2fs"], help="Root filesystem type (ext4, btrfs, xfs, f2fs). Default: ext4")
 
     parser.add_argument(
         "-p",
@@ -171,11 +182,25 @@ def main():
     )
 
     parser.add_argument(
+        "--service-profile",
+        action="append",
+        default=[],
+        help="Add service profile from configs/services/ (repeatable or comma-separated).",
+    )
+
+    parser.add_argument(
+        "--live-profile",
+        type=str,
+        default=None,
+        help="Live-user profile from configs/live-users/ (for example: admin or guest).",
+    )
+
+    parser.add_argument(
         "-f",
         "--format",
-        choices=["iso", "img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi", "tarball", "container"],
+        choices=["iso", "netboot", "img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi", "tarball", "container", "oci"],
         default="iso",
-        help="Output artifact format: iso, img, qcow2, vmdk, vhd, vdi, tarball, container. Default: iso",
+        help="Output artifact format: iso, netboot, img/raw, qcow2, vdi, vmdk, vhd/vhdx, tarball, or OCI/container. Default: iso",
     )
 
     parser.add_argument(
@@ -315,21 +340,57 @@ def main():
         help="Mount working directory as tmpfs in RAM for extreme build speed.",
     )
 
+    parser.add_argument(
+        "--hooks-dir",
+        default=None,
+        help="Hook root containing ordered <phase>.d directories. Default: hooks/.",
+    )
+    parser.add_argument(
+        "--no-hooks",
+        action="store_true",
+        help="Disable all build hooks.",
+    )
+
     args = parser.parse_args()
+
+    if args.di_mode == "netboot":
+        args.with_debian_installer = True
+        if "--format" not in sys.argv and "-f" not in sys.argv:
+            args.format = "netboot"
+    elif args.di_mode == "netinstall":
+        args.with_debian_installer = True
+
+    if args.vm_profile:
+        if args.device:
+            parser.error("--device and --vm-profile cannot be combined")
+        vm_file = resolve_from_project(f"configs/vm/{args.vm_profile}.json")
+        try:
+            vm_config = ConfigLoader(resolve_from_project("configs")).load_json(vm_file)
+        except ConfigLoaderError as exc:
+            parser.error(str(exc))
+        if "--format" not in sys.argv and "-f" not in sys.argv:
+            args.format = vm_config["output_format"]
 
 
     # ── Handle Device Profile ───────────────────────────────────────────────────
     if getattr(args, "device", None):
         device_file = resolve_from_project(f"configs/hardware/{args.device}.json")
         if device_file.exists():
-            import json
-            with open(device_file) as f:
-                dev_cfg = json.load(f)
+            try:
+                dev_cfg = ConfigLoader(config_root=resolve_from_project("configs")).load_json(device_file)
+            except ConfigLoaderError as exc:
+                parser.error(str(exc))
+            if dev_cfg.get("status") == "experimental":
+                print(
+                    f"⚠️ Hardware profile '{args.device}' is experimental: "
+                    f"{dev_cfg.get('notes', 'platform-specific boot files are required')}",
+                    file=sys.stderr,
+                )
             
             # Explicitly update args.architecture if not provided on CLI
             if "architecture" in dev_cfg:
                 # If architecture was not passed in sys.argv (not considering flags for architecture since it is positional usually)
-                arch_passed = any(a in getattr(args, "architecture", "") for a in sys.argv[1:]) if getattr(args, "architecture", None) else False
+                arch_passed = any(a in VALID_ARCHS for a in sys.argv[1:])
                 if not arch_passed or getattr(args, "architecture", "") == "x86_64":
                     args.architecture = dev_cfg["architecture"]
             
@@ -342,31 +403,36 @@ def main():
                 # To prevent config_loader from crashing when we pass a dict, we can dump it to a temporary file
                 # OR we just set args.bootloader = dev_cfg["bootloader"] and fix config_loader.py
                 args.bootloader = dev_cfg["bootloader"]
+        else:
+            parser.error(f"Unknown hardware device profile: {args.device}")
                 
     # Map architectures to Debian style
     if hasattr(args, 'architecture'):
         if args.architecture == 'x86_64':
             args.architecture = 'amd64'
-        elif args.architecture == 'aarch64':
-            args.architecture = 'arm64'
+        elif args.architecture == 'i686':
+            args.architecture = 'i386'
 
 
     config_root = resolve_from_project("configs")
     if args.list_options:
         print("Available Deb-Dev-Builder profiles:")
         categories = [
-            ("architectures", "architectures"),
-            ("system",       "distros      "),
-            ("system",  "init-systems "),
-            ("desktops",      "desktops     "),
-            ("system",       "kernels      "),
-            ("boot",   "bootloaders  "),
-            ("software",      "packages     "),
-            ("services",      "services     "),
-            ("repos",         "repos        "),
+            ("architectures", "architectures", "arch"),
+            ("system",       "distros      ", "distro"),
+            ("system",       "init-systems ", "init_system"),
+            ("desktops",     "desktops     ", "desktop"),
+            ("system",       "variants     ", "variant"),
+            ("system",       "kernels      ", "kernel"),
+            ("boot",         "bootloaders  ", "bootloader"),
+            ("software",     "packages     ", None),
+            ("services",     "services     ", "services"),
+            ("live-users",   "live-users   ", "live_user"),
+            ("hardware",     "hardware     ", "architecture"),
+            ("vm",           "vm           ", "output_format"),
         ]
-        for dir_name, label in categories:
-            profs = _available_profiles(config_root, dir_name)
+        for dir_name, label, profile_key in categories:
+            profs = _available_profiles(config_root, dir_name, profile_key)
             print(f"  {label}: {', '.join(profs) if profs else '(none)'}")
         sys.exit(0)
 
@@ -376,6 +442,7 @@ def main():
         sys.exit(1)
 
     parsed_package_profiles = _parse_list_arg(args.package_profile)
+    parsed_service_profiles = _parse_list_arg(args.service_profile)
     parsed_offline_packages = _parse_list_arg(args.offline_repo_packages)
 
     try:
@@ -392,6 +459,8 @@ def main():
             bootloader=args.bootloader,
             variant=args.variant,
             package_profiles=parsed_package_profiles,
+            service_profiles=parsed_service_profiles,
+            live_profile=args.live_profile,
             output_format=args.format,
             with_calamares=args.with_calamares,
             with_debian_installer=args.with_debian_installer,
@@ -405,8 +474,16 @@ def main():
             with_offline_repo=args.with_offline_repo,
             offline_repo_packages=parsed_offline_packages,
             force_isolated_toolchain=args.force_isolated_toolchain,
-        fast_mode=getattr(args, "fast_mode", False),
-        use_tmpfs=getattr(args, "tmpfs", False),)
+            compression=args.compression,
+            hostname=args.hostname,
+            live_user_name=args.live_user,
+            fast_mode=getattr(args, "fast_mode", False),
+            use_tmpfs=getattr(args, "tmpfs", False),
+            hooks_dir=args.hooks_dir,
+            hooks_enabled=not args.no_hooks,
+            hardware_profile=args.device,
+            vm_profile=args.vm_profile,
+        )
     except (ConfigLoaderError, BuildOrchestratorError) as exc:
         print(f"❌ Error: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -423,7 +500,7 @@ def main():
     print(f"🚀 Starting Deb-Dev-Builder [{args.mode.upper()} MODE] for {arch_lower} ({args.distro})...")
     try:
         artifact = orchestrator.build(output_name=args.output)
-    except (BuildOrchestratorError, ToolchainManagerError, APTManagerError, ISOEngineError, DiskEngineError, ContainerEngineError, RuntimeError, subprocess.CalledProcessError) as exc:
+    except (BuildOrchestratorError, ToolchainManagerError, APTManagerError, ChrootManagerError, ISOEngineError, DiskEngineError, ContainerEngineError, RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"❌ Error: {exc}", file=sys.stderr)
         sys.exit(1)
 

@@ -1,4 +1,5 @@
 {
+  "packages": ["network-manager"],
   "services": {
     "enable": ["NetworkManager"],
     "disable": []

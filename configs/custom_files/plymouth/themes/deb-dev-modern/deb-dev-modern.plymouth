@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Deb-Dev Modern
+Description=Debian & Devuan Modern Custom Splash Theme
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/deb-dev-modern
+ScriptFile=/usr/share/plymouth/themes/deb-dev-modern/deb-dev-modern.script

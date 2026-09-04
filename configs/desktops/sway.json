@@ -1,5 +1,6 @@
 {
   "desktop": "sway",
   "display_manager": "sddm",
+  "session_type": "wayland",
   "packages": ["sway", "sddm"]
 }

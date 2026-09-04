@@ -1,0 +1,8 @@
+:root {
+  --color-brand-primary: #a80030;
+  --color-brand-content: #a80030;
+}
+
+.content table {
+  width: 100%;
+}

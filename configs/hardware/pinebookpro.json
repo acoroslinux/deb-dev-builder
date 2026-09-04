@@ -1,8 +1,15 @@
 {
-    "name": "Pinebook Pro",
+  "name": "Pinebook Pro",
+  "status": "experimental",
+  "notes": "Requires idbloader.img and u-boot.itb in /boot/u-boot.",
     "architecture": "aarch64",
     "bootloader": {
         "type": "u-boot-pinebookpro"
     },
+    "partition_start_mib": 16,
+    "boot_artifacts": [
+        {"source": "/boot/u-boot/idbloader.img", "offset_kib": 32, "required": true},
+        {"source": "/boot/u-boot/u-boot.itb", "offset_kib": 8192, "required": true}
+    ],
     "output_format": "img"
 }

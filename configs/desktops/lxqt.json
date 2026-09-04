@@ -1,5 +1,6 @@
 {
   "desktop": "lxqt",
   "display_manager": "sddm",
+  "session_type": "x11",
   "packages": ["lxqt", "sddm"]
 }

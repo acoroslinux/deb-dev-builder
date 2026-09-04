@@ -1,4 +1,4 @@
 {
   "variant": "minimal",
-  "packages": ["base-files"]
+  "exclude_packages": ["curl", "wget", "sudo", "user-setup", "zstd"]
 }

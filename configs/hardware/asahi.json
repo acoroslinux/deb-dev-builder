@@ -1,8 +1,12 @@
 {
-    "name": "Apple Silicon (Asahi)",
+  "name": "Apple Silicon (Asahi)",
+  "status": "experimental",
+  "notes": "Requires platform-specific Asahi firmware and boot artifacts not supplied by this project.",
     "architecture": "aarch64",
     "bootloader": {
         "type": "asahi"
     },
+    "firmware_tree": "/boot/efi",
+    "required_files": ["/boot/efi/m1n1/boot.bin"],
     "output_format": "img"
 }

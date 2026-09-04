@@ -1,6 +1,7 @@
 {
   "desktop": "kde",
   "display_manager": "sddm",
+  "session_type": "both",
   "packages": [
     "kde-plasma-desktop",
     "plasma-workspace",

@@ -1,6 +1,7 @@
 {
   "desktop": "xfce",
   "display_manager": "lightdm",
+  "session_type": "x11",
   "packages": [
     "xfce4",
     "xfce4-goodies",
