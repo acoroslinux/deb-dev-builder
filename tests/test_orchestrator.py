@@ -254,3 +254,29 @@ def test_three_hook_phases_follow_build_lifecycle_and_always_unmount(
         assert events.index("post-chroot") < events.index("checksums")
     assert "unmount" in events
     assert "toolchain:umount_virtual_fs" in events
+
+
+def test_real_build_lock_prevents_concurrent_cleanup_and_releases_on_failure(tmp_path, monkeypatch):
+    import fcntl
+    from deb_dev_builder.core import orchestrator as module
+    orch = make_orchestrator(tmp_path=tmp_path)
+    orch.mode = "real"
+    lock_path = tmp_path / "build.lock"
+    monkeypatch.setattr(module, "resolve_from_project", lambda path: lock_path)
+    calls = []
+
+    def build(output_name):
+        calls.append(output_name)
+        raise RuntimeError("failure after taking lock")
+
+    monkeypatch.setattr(orch, "_build", build)
+    with lock_path.open("a+") as other:
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(module.BuildOrchestratorError, match="Another real build"):
+            orch.build()
+        assert calls == []
+    with pytest.raises(RuntimeError, match="after taking lock"):
+        orch.build()
+    with lock_path.open("a+") as other:
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    assert calls == [None]

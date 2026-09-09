@@ -1,5 +1,10 @@
 # Build pipeline
 
+Real builds acquire a project-wide lock in `cache/build.lock` before touching
+the shared build host or workdirs. A second real build exits without cleaning
+or unmounting the first build's resources. Chroot commands check that active
+virtual mounts are still present and use `C.UTF-8` unless explicitly overridden.
+
 1. Load and validate the selected JSON profiles.
 2. Run `configs/hooks/pre-chroot` on the host, then prepare the isolated toolchain.
 3. Bootstrap with `mmdebstrap`, falling back to `debootstrap`. APT recommendations remain enabled by default.

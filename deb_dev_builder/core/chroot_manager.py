@@ -116,6 +116,14 @@ class ChrootManager:
             logger.info(f"[MOCK CHROOT EXEC] {cmd_str}")
             return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
 
+        if self.is_mounted:
+            missing = [name for name in ("proc", "sys", "dev")
+                       if not os.path.ismount(self.target_root / name)]
+            if missing:
+                raise ChrootManagerError(
+                    f"Target virtual filesystems disappeared before chroot execution: {', '.join(missing)}"
+                )
+
         if isinstance(command, str):
             cmd = ["chroot", str(self.target_root), "/bin/sh", "-c", command]
         else:
@@ -124,6 +132,8 @@ class ChrootManager:
         full_env = os.environ.copy()
         full_env["DEBIAN_FRONTEND"] = "noninteractive"
         full_env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        # The host locale may not exist yet in the target during APT setup.
+        full_env["LC_ALL"] = "C.UTF-8"
         if env:
             full_env.update(env)
 

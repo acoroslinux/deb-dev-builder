@@ -337,6 +337,26 @@ class BuildOrchestrator:
         }
 
     def build(self, output_name: Optional[str] = None) -> Path:
+        if self.mode == "mock":
+            return self._build(output_name)
+        # Every architecture shares build_host and the cleanup scope. Lock
+        # outside workdir before any process can unmount or remove that tree.
+        import fcntl
+        lock_path = resolve_from_project("cache/build.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise BuildOrchestratorError(
+                    "Another real build is using this project; wait for it to finish before rebuilding."
+                ) from exc
+            try:
+                return self._build(output_name)
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def _build(self, output_name: Optional[str] = None) -> Path:
         validation = self.validate()
         if not validation["valid"]:
             raise BuildOrchestratorError("Invalid build configuration: " + "; ".join(validation["errors"]))
