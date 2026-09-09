@@ -13,7 +13,7 @@ cache/
 tmp/
 tmp_efi/
 iso_root/
-chroot/
+/chroot/
 build_host/
 
 # ISOs, Disk Images, Tarballs, and Checksums
