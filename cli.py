@@ -343,7 +343,7 @@ def main():
     parser.add_argument(
         "--hooks-dir",
         default=None,
-        help="Hook root containing ordered <phase>.d directories. Default: hooks/.",
+        help="Hook root containing pre-chroot, chroot and post-chroot directories. Default: configs/hooks/.",
     )
     parser.add_argument(
         "--no-hooks",

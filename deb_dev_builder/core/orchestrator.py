@@ -15,7 +15,7 @@ from deb_dev_builder.core.container_engine import ContainerEngine
 from deb_dev_builder.core.config_loader import ConfigLoader
 from deb_dev_builder.core.path_utils import resolve_from_project, safe_remove_tree, unmount_all_under, mountpoints_under
 from deb_dev_builder.core.chroot_cleaner import ChrootCleaner
-from deb_dev_builder.core.hook_runner import HookRunner
+from deb_dev_builder.core.hook_manager import HookManager
 import logging
 
 logger = logging.getLogger("orchestrator")
@@ -431,18 +431,13 @@ class BuildOrchestrator:
         )
         chroot = ChrootManager(self.target_root, self.mode, cache_dir=resolve_from_project(f"cache/{self.arch}"), arch=self.arch)
         artifact = None
-        hooks = HookRunner(
-            self.hooks_dir,
-            self.config,
-            self.workdir,
-            self.target_root,
-            self.mode,
-            enabled=self.hooks_enabled,
+        hooks = HookManager(
+            chroot, self.config, hooks_dir=self.hooks_dir,
+            workdir=self.workdir, enabled=self.hooks_enabled,
         )
         try:
-            hooks.run("preflight")
+            hooks.run_stage("pre-chroot")
             toolchain.setup()
-            hooks.run("post-toolchain")
             # The isolated toolchain must be mounted before bootstrap so that
             # mmdebstrap/debootstrap never executes from the host.
             toolchain.mount_virtual_fs()
@@ -451,16 +446,15 @@ class BuildOrchestrator:
                 toolchain.ensure_devuan_debootstrap_scripts([self.config.get("suite", "ceres")])
             installer_only = self.output_format == "netboot" or self.di_mode == "netinstall"
             if installer_only:
-                hooks.run("pre-installer")
-                hooks.run("pre-artifact")
                 iso_engine = ISOEngine(self.workdir, self.target_root, name, self.config, self.mode, toolchain)
                 artifact = (
                     iso_engine.build_netboot_archive()
                     if self.output_format == "netboot"
                     else iso_engine.build_iso()
                 )
-                hooks.run("post-installer", artifact=artifact)
-                hooks.run("post-artifact", artifact=artifact)
+                self._verify_artifact(artifact)
+                hooks.run_stage("post-chroot", artifact=artifact)
+                self._verify_artifact(artifact)
                 if self.generate_manifest and artifact.exists():
                     self._generate_checksums(artifact, chroot=chroot)
                 self._fix_output_permissions(artifact.parent)
@@ -468,30 +462,17 @@ class BuildOrchestrator:
 
             apt = APTManager(chroot, self.config, toolchain=toolchain)
             suite = self.config.get("suite", "bookworm")
-            hooks.run("pre-bootstrap")
             apt.bootstrap_rootfs(suite, self.config.get("dpkg_arch", self.arch), use_seed=self.use_seed, recreate_seed=self.recreate_seed, reuse_existing=not self.clean)
-            hooks.run("post-bootstrap")
-            hooks.run_chroot("post-bootstrap", chroot)
-            hooks.run("pre-chroot-mount")
             toolchain.mount_virtual_fs()
             chroot.mount_virtual_fs()
-            hooks.run("post-chroot-mount")
-            hooks.run_chroot("post-chroot-mount", chroot)
-            hooks.run("pre-apt")
             apt.configure_sources_list()
             apt.update_apt_cache()
-            hooks.run("post-apt")
-            hooks.run_chroot("post-apt", chroot)
 
             pkgs = list(self.config.get("software", []))
             zram_package = "systemd-zram-generator" if self.init_system == "systemd" else "zram-tools"
             if self.with_zram and zram_package not in pkgs:
                 pkgs.append(zram_package)
-            hooks.run("pre-packages")
-            hooks.run_chroot("pre-packages", chroot)
             apt.install_packages(pkgs)
-            hooks.run("post-packages")
-            hooks.run_chroot("post-packages", chroot)
 
             # Prepare offline package repository if requested
             # The catalog profile is opt-in: merely defining package names
@@ -544,11 +525,7 @@ class BuildOrchestrator:
                 self.config["with_offline_repo"] = True
 
             customizer = SystemCustomizer(chroot, self.config)
-            hooks.run("pre-customize")
-            hooks.run_chroot("pre-customize", chroot)
             customizer.configure_live_environment()
-            hooks.run("post-customize")
-            hooks.run_chroot("post-customize", chroot)
             
             # --- INSTALL BOOTLOADER IN CHROOT (DEBIAN SPECIFIC) ---
             disk_formats = {"img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi"}
@@ -576,11 +553,7 @@ class BuildOrchestrator:
                     print(f"\n[MOCK] Simulated bootloader installation: {btype}")
             # ----------------------------------------------------
 
-            hooks.run("pre-installer")
-            hooks.run_chroot("pre-installer", chroot)
-            hooks.run("post-installer")
-            hooks.run_chroot("post-installer", chroot)
-            hooks.run("pre-unmount")
+            hooks.run_stage("chroot")
             chroot.umount_virtual_fs()
             unmount_all_under(self.target_root)
             # Some kernels retain descendants of recursive /dev binds after
@@ -597,16 +570,14 @@ class BuildOrchestrator:
                 unmount_all_under(self.target_root)
             if os.geteuid() == 0 and mountpoints_under(self.target_root):
                 raise BuildOrchestratorError(f"Target root still has mounted host paths: {mountpoints_under(self.target_root)}")
-            hooks.run("post-unmount")
-            hooks.run("pre-cleanup")
-            hooks.run_chroot("pre-cleanup", chroot)
             if self.rootfs_cleanup:
                 cleanup_report = ChrootCleaner(self.target_root, self.config).clean()
                 logger.info("Rootfs cleanup removed %d entries", cleanup_report.get("removed", 0))
-            hooks.run("post-cleanup")
-            hooks.run_chroot("post-cleanup", chroot)
-            hooks.run("pre-artifact")
 
+            if self.mode != "mock" and not all(
+                (self.target_root / directory).is_dir() for directory in ("etc", "usr")
+            ):
+                raise BuildOrchestratorError("Target rootfs is missing required etc/usr directories")
             iso_engine = ISOEngine(self.workdir, self.target_root, name, self.config, self.mode, toolchain)
             disk_formats = {"img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi"}
 
@@ -622,30 +593,15 @@ class BuildOrchestrator:
                 artifact = iso_engine.build_netboot_archive()
             else:
                 artifact = iso_engine.build_iso()
-
-            hooks.run("post-artifact", artifact=artifact)
-
+            self._verify_artifact(artifact)
+            hooks.run_stage("post-chroot", artifact=artifact)
+            self._verify_artifact(artifact)
             if self.generate_manifest and artifact and artifact.exists():
                 self._generate_checksums(artifact, chroot=chroot)
-
             self._fix_output_permissions(artifact.parent)
 
             return artifact
-        except Exception as exc:
-            try:
-                hooks.run("on-error", artifact=artifact, error=exc)
-            except Exception:
-                logger.exception("Error hook failed")
-            raise
         finally:
-            try:
-                hooks.run("cleanup", artifact=artifact)
-            except Exception:
-                logger.exception("Cleanup hook failed")
-            try:
-                hooks.run_chroot("cleanup", chroot, artifact=artifact)
-            except Exception:
-                logger.exception("Chroot cleanup hook failed")
             try:
                 chroot.umount_virtual_fs()
             except Exception:
@@ -680,6 +636,10 @@ class BuildOrchestrator:
             self._fix_output_permissions(output_dir)
             if artifact:
                 self._fix_output_permissions(artifact.parent)
+
+    def _verify_artifact(self, artifact: Path):
+        if not artifact.is_file() or (self.mode != "mock" and artifact.stat().st_size == 0):
+            raise BuildOrchestratorError(f"Build did not produce a non-empty artifact: {artifact}")
 
     def _fix_output_permissions(self, output_dir: Path):
         """Fix ownership of output directory and built ISOs from root to SUDO_USER if invoked via sudo."""

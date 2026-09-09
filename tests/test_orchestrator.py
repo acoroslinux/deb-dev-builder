@@ -169,3 +169,88 @@ class TestOrchestrator:
         orch._generate_checksums(artifact)
         assert (tmp_path / "artifact.iso.sha256").is_file()
         assert (tmp_path / "artifact.iso.md5").is_file()
+
+
+@pytest.mark.parametrize("output_format,di_mode,fail_stage", [
+    ("iso", None, None), ("img", None, None),
+    ("netboot", "netboot", None), ("iso", "netinstall", None),
+    ("iso", None, "pre-chroot"), ("iso", None, "chroot"),
+    ("iso", None, "post-chroot"),
+])
+def test_three_hook_phases_follow_build_lifecycle_and_always_unmount(
+    tmp_path, monkeypatch, output_format, di_mode, fail_stage,
+):
+    from deb_dev_builder.core import orchestrator as module
+    from deb_dev_builder.core.hook_manager import HookError, HookManager
+    events = []
+    artifact = tmp_path / "result.bin"
+    options = dict(output_format=output_format)
+    if di_mode:
+        options.update(with_debian_installer=True, di_mode=di_mode)
+    orch = make_orchestrator(tmp_path=tmp_path, **options)
+    installer_only = di_mode is not None
+
+    for method in ("setup", "mount_virtual_fs", "umount_virtual_fs"):
+        monkeypatch.setattr(module.ToolchainManager, method,
+                            lambda self, method=method: events.append("toolchain:" + method))
+
+    def mount(self):
+        self.is_mounted = True
+        events.append("mount")
+
+    def unmount(self):
+        self.is_mounted = False
+        events.append("unmount")
+
+    monkeypatch.setattr(module.ChrootManager, "mount_virtual_fs", mount)
+    monkeypatch.setattr(module.ChrootManager, "umount_virtual_fs", unmount)
+    monkeypatch.setattr(module, "unmount_all_under", lambda root: None)
+    monkeypatch.setattr(module, "mountpoints_under", lambda root: [])
+    for method in ("bootstrap_rootfs", "configure_sources_list", "update_apt_cache", "install_packages"):
+        monkeypatch.setattr(module.APTManager, method,
+                            lambda self, *args, method=method, **kwargs: events.append(method))
+    monkeypatch.setattr(module.SystemCustomizer, "configure_live_environment",
+                        lambda self: events.append("customize"))
+    monkeypatch.setattr(module.ChrootCleaner, "clean", lambda self: {"removed": 0})
+
+    def build_artifact(self, *args, **kwargs):
+        events.append("artifact")
+        artifact.write_bytes(b"artifact")
+        return artifact
+
+    monkeypatch.setattr(module.ISOEngine, "build_iso", build_artifact)
+    monkeypatch.setattr(module.ISOEngine, "build_netboot_archive", build_artifact)
+    monkeypatch.setattr(module.DiskEngine, "build_disk_image", build_artifact)
+    monkeypatch.setattr(orch, "_generate_checksums", lambda *args, **kwargs: events.append("checksums"))
+    original = HookManager.run_stage
+
+    def phase(self, stage, **kwargs):
+        assert self.hooks_base == module.resolve_from_project("configs/hooks")
+        events.append(stage)
+        if stage == "pre-chroot":
+            assert "toolchain:setup" not in events
+        elif stage == "chroot":
+            assert self.chroot.is_mounted
+            assert "install_packages" in events and "customize" in events
+            assert "artifact" not in events
+        else:
+            assert not self.chroot.is_mounted
+            assert kwargs["artifact"].is_file()
+        if stage == fail_stage:
+            raise HookError("deliberate failure")
+        return original(self, stage, **kwargs)
+
+    monkeypatch.setattr(HookManager, "run_stage", phase)
+    if fail_stage:
+        with pytest.raises(HookError, match="deliberate failure"):
+            orch.build(output_name=str(artifact))
+        assert "checksums" not in events
+        if fail_stage != "post-chroot":
+            assert "artifact" not in events
+    else:
+        assert orch.build(output_name=str(artifact)) == artifact
+        expected = ["pre-chroot", "post-chroot"] if installer_only else list(HookManager.STAGES)
+        assert [event for event in events if event in HookManager.STAGES] == expected
+        assert events.index("post-chroot") < events.index("checksums")
+    assert "unmount" in events
+    assert "toolchain:umount_virtual_fs" in events

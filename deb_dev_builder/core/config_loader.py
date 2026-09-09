@@ -409,9 +409,9 @@ class ConfigLoader:
             if not isinstance(boot, dict) or set(boot) - {"kernel_params"}:
                 errors.append(f"{global_path}: invalid boot settings")
             hooks = global_data.get("hooks", {})
-            if not isinstance(hooks, dict) or set(hooks) - {"enabled", "directory", "chroot_directory"}:
+            if not isinstance(hooks, dict) or set(hooks) - {"enabled", "directory"}:
                 errors.append(f"{global_path}: invalid hooks settings")
-            elif not isinstance(hooks.get("enabled", True), bool) or not isinstance(hooks.get("directory", "hooks"), str) or not isinstance(hooks.get("chroot_directory", "chroot"), str):
+            elif not isinstance(hooks.get("enabled", True), bool) or not isinstance(hooks.get("directory", "configs/hooks"), str) or not hooks.get("directory", "configs/hooks").strip():
                 errors.append(f"{global_path}: hooks.enabled/directory have invalid types")
             cleanup = global_data.get("cleanup", {})
             cleanup_keys = {"enabled", "apt_lists", "apt_archives", "logs", "temporary", "caches", "bytecode", "builder_metadata", "machine_identity"}

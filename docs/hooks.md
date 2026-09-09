@@ -1,56 +1,51 @@
 # Build hooks
 
-Host hooks are executable files placed in `hooks/<phase>.d/`; in-target hooks
-are placed in `hooks/chroot/<phase>.d/`. Files run in lexical order. Host hooks
-run directly without a shell wrapper; chroot hooks are copied into the target
-and executed with `chroot`. A non-zero exit code stops the build. Mock mode
-discovers hooks but never executes them.
+Build hooks use the existing three directories under `configs/hooks/`:
 
-| Phase | Runs |
-|---|---|
-| `pre-bootstrap` | before creating the target rootfs |
-| `preflight` | before toolchain setup |
-| `post-toolchain` | after toolchain setup |
-| `post-bootstrap` | after bootstrap, APT sources and cache update |
-| `pre-chroot-mount` | immediately before virtual filesystem mounts |
-| `post-chroot-mount` | after virtual filesystem mounts |
-| `pre-apt` | before writing APT sources and updating metadata |
-| `post-apt` | after APT metadata update |
-| `pre-packages` | immediately before package installation |
-| `post-packages` | after package installation |
-| `pre-customize` | before system customization |
-| `post-customize` | after users, services, desktop and installer customization |
-| `pre-installer` | before bootloader/installer staging |
-| `post-installer` | after bootloader/installer staging |
-| `pre-unmount` | immediately before chroot unmount |
-| `post-unmount` | after chroot unmount |
-| `pre-artifact` | after unmounting the target and before packaging |
-| `post-artifact` | after artifact creation and before final checksums |
-| `on-error` | when any build phase raises an error |
-| `cleanup` | from the final cleanup path, on success or failure |
+| Directory | Execution point | Environment |
+|---|---|---|
+| `pre-chroot` | Before toolchain setup and rootfs bootstrap | Host |
+| `chroot` | After package installation, customization and bootloader setup, before unmounting | Target chroot |
+| `post-chroot` | After artifact creation, before final checksums and workdir cleanup | Host |
 
-Available environment variables include `DEB_DEV_HOOK_PHASE`,
-`DEB_DEV_HOOK_SCOPE`,
-`DEB_DEV_WORKDIR`, `DEB_DEV_TARGET_ROOT`, `DEB_DEV_ARCH`,
-`DEB_DEV_DPKG_ARCH`, `DEB_DEV_DISTRO`, `DEB_DEV_SUITE`,
-`DEB_DEV_OUTPUT_FORMAT`, `DEB_DEV_ARTIFACT`, and `DEB_DEV_ERROR`.
+Only executable, non-hidden, non-symlink `*.sh` files run, in alphabetical
+order, through Bash. Hook sources are never created, rewritten or chmodded by
+the executor. Missing phase directories are skipped without creating them.
+Host hooks use the project root as their working directory. Target hooks run
+with `/proc`, `/sys` and `/dev` mounted, using a unique temporary `.sh` file
+inside target `/tmp`; each temporary copy is removed on success or failure.
+Existing files with the source script name are preserved.
 
-Example:
+A non-zero hook exit stops the build. Resource unmounting and configured workdir
+cleanup remain in the orchestrator's `finally` block; they do not depend on
+user hooks. There are no separate error or cleanup hook directories.
+Mock mode discovers hooks but never executes or stages them.
 
-```bash
-mkdir -p hooks/post-customize.d
-cp my-board-firmware-hook hooks/post-customize.d/20-board-firmware
-chmod +x hooks/post-customize.d/20-board-firmware
-sudo python cli.py --device pinebookpro --distro debian-13 --mode real
-```
+Use `--hooks-dir PATH` to select another root with the same three-directory
+layout, or `--no-hooks` to disable all hooks. Relative roots are resolved from
+the project root. The default is `hooks.directory = "configs/hooks"` in
+`configs/global_build.json`; `hooks.enabled = false` also disables hooks.
+The old `chroot_directory` setting is no longer part of the configuration.
 
-Use `--hooks-dir PATH` for another root or `--no-hooks` to disable the system.
-The default is controlled by `hooks.enabled` and `hooks.directory` in
-`configs/global_build.json`.
+All three phases receive `TARGET_ROOT`, `CHROOT_PATH`, `BUILD_ARCH`,
+`BUILD_DESKTOP` and `HOOK_PHASE`. Root paths describe the absolute target
+location on the host; scripts running inside the chroot use `/` to access the
+target filesystem. Additional context is available as `DEB_DEV_WORKDIR`,
+`DEB_DEV_TARGET_ROOT`, `DEB_DEV_ARCH`, `DEB_DEV_DPKG_ARCH`, `DEB_DEV_DISTRO`,
+`DEB_DEV_SUITE`, `DEB_DEV_OUTPUT_FORMAT`, `DEB_DEV_HOOK_PHASE`,
+`DEB_DEV_HOOK_SCOPE` and `DEB_DEV_ARTIFACT` (empty before artifact creation).
 
-Installer-only netinstall/netboot builds skip bootstrap, APT and chroot phases;
-their applicable hooks are `preflight`, `post-toolchain`, `pre-installer`,
-`pre-artifact`, `post-installer`, `post-artifact`, `on-error` and `cleanup`.
+Installer-only netinstall and netboot builds run the two host phases and skip
+`chroot`, because they do not construct a target rootfs. Other artifact formats
+run all three phases. Final checksums are generated after `post-chroot` so
+changes made by a hook are included.
 
-Normal rootfs builds additionally run `pre-cleanup` and `post-cleanup` after
-all target-root mounts are removed and before artifact packaging.
+The scripts already supplied in `configs/hooks` keep their own behavior. In
+particular, the chroot cleanup script removes APT lists regardless of the
+built-in cleaner's `cleanup.apt_lists` option. The post-chroot script lists
+artifacts in the default output directory; it is not a checksum validator.
+The orchestrator separately rejects missing or empty real-build artifacts.
+
+The legacy `hooks/` tree is no longer discovered by the build pipeline. No
+`<phase>.d` directories are required. Custom hooks for that layout must be
+placed in the appropriate one of the three phases under the configured root.

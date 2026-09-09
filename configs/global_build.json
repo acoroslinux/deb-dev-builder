@@ -10,8 +10,7 @@
   },
   "hooks": {
     "enabled": true,
-    "directory": "hooks",
-    "chroot_directory": "chroot"
+    "directory": "configs/hooks"
   },
   "cleanup": {
     "enabled": true,
