@@ -10,5 +10,12 @@
     "xfce4-terminal",
     "xfce4-power-manager",
     "xfce4-notifyd"
+  ],
+  "exclude_packages": [
+    "polkit-kde-agent-1",
+    "lxqt-polkit",
+    "ukui-polkit",
+    "lomiri-polkit-agent",
+    "systemsettings"
   ]
 }

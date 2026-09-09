@@ -1,3 +1,8 @@
 {
-  "packages": ["htop", "btop", "fastfetch", "tmux", "zsh", "fzf", "ripgrep", "bat", "unzip", "p7zip-full", "rsync", "tree", "lsof"]
+  "packages": [
+    "htop", "btop", "fastfetch", "tmux", "zsh", "fzf", "ripgrep", "bat",
+    "unzip", "p7zip-full", "rsync", "tree", "lsof", "file", "aptitude", "nala", "less", "nano",
+    "vim-tiny", "jq", "psmisc", "procps", "pciutils", "usbutils", "lshw",
+    "smartmontools", "parted", "gdisk", "nvme-cli"
+  ]
 }

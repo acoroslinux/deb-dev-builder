@@ -1,0 +1,18 @@
+{
+  "packages": [
+    "pulseaudio",
+    "pulseaudio-utils",
+    "pulseaudio-module-bluetooth",
+    "pavucontrol",
+    "alsa-utils",
+    "libasound2-plugins"
+  ],
+  "exclude_packages": [
+    "pipewire",
+    "pipewire-audio",
+    "pipewire-pulse",
+    "pipewire-alsa",
+    "wireplumber",
+    "libspa-0.2-bluetooth"
+  ]
+}

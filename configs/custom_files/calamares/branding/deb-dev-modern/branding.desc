@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: CC0-1.0
+---
+componentName: deb-dev-modern
+
+strings:
+    productName:         "Deb-Dev Modern"
+    shortProductName:    "DebDev"
+    version:             "2026.09"
+    shortVersion:        "2026.09"
+    versionedName:       "Deb-Dev Modern 2026.09"
+    shortVersionedName:  "DebDev 2026.09"
+    installLabel:        "Install Deb-Dev Modern"
+    productUrl:          "https://github.com/acoroslinux/deb-dev-builder"
+    supportUrl:          "https://github.com/acoroslinux/deb-dev-builder/issues"
+    knownIssuesUrl:      "https://github.com/acoroslinux/deb-dev-builder/issues"
+    releaseNotesUrl:     "https://github.com/acoroslinux/deb-dev-builder/releases"
+
+images:
+    productLogo:         "logo.png"
+    productIcon:         "logo.png"
+    welcomeImage:        "logo.png"
+
+welcomeStyleCalamares: false
+welcomeExpandingLogo: true
+windowExpanding: normal
+windowSize: 920px,630px
+windowPlacement: center
+
+# Use Calamares' native Qt navigation and sidebar.  The native widgets are
+# compatible with the Debian Qt build and remain accessible on small screens.
+slideshow: "show.qml"
+slideshowAPI: 2
+
+style:
+    SidebarBackground: "#1A1C1E"
+    SidebarText: "#8C92AC"
+    SidebarTextCurrent: "#47A7F5"
+    SidebarBackgroundCurrent: "#24292F"
+    sidebarBackground: "#1A1C1E"
+    sidebarText: "#8C92AC"
+    sidebarTextSelect: "#47A7F5"
+    sidebarTextHighlight: "#9E00FF"

@@ -1,3 +1,6 @@
 {
-  "packages": ["firefox-esr", "chromium"]
+  "packages": [
+    "firefox-esr",
+    "chromium"
+  ]
 }

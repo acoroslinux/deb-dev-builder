@@ -113,11 +113,32 @@ class SystemCustomizer:
         services_to_disable = list(service_config.get("disable", [])) if isinstance(service_config, dict) else []
         init_system = self.config.get("init_system", "systemd")
 
+        # A live desktop must not wait for a fully configured network before
+        # showing the session.  NetworkManager is still enabled; only the
+        # boot-blocking wait units are masked.
+        if self.config.get("variant") == "live" and init_system == "systemd":
+            for wait_unit in ("NetworkManager-wait-online.service", "systemd-networkd-wait-online.service"):
+                if wait_unit not in services_to_disable:
+                    services_to_disable.append(wait_unit)
+            # Winbind is only needed for an AD/domain client.  The default
+            # standalone Samba setup must not block user-session startup on
+            # NSS lookups.
+            if "winbind.service" not in services_to_disable:
+                services_to_disable.append("winbind.service")
+
         for auto_svc in ["NetworkManager"]:
             if auto_svc not in services_to_enable:
                 unit = self.target_root / "usr" / "lib" / "systemd" / "system" / f"{auto_svc}.service"
                 if unit.exists():
                     services_to_enable.append(auto_svc)
+
+        # Enable network sharing/printing daemons only when their packages
+        # are present.  This keeps minimal images unchanged while making a
+        # desktop live image discoverable by Linux and Windows clients.
+        for auto_svc in ("smbd", "nmbd", "avahi-daemon", "cups", "cups-browsed"):
+            unit = self.target_root / "usr" / "lib" / "systemd" / "system" / f"{auto_svc}.service"
+            if unit.exists() and auto_svc not in services_to_enable:
+                services_to_enable.append(auto_svc)
 
         display_manager = self.config.get("display_manager")
         if display_manager:
@@ -159,6 +180,12 @@ class SystemCustomizer:
             else:
                 continue
             self.chroot.run_in_chroot(command, check=False)
+            if init_system == "systemd" and self.config.get("variant") == "live":
+                unit_path = self.target_root / "etc" / "systemd" / "system" / str(svc)
+                if unit_path.exists() or unit_path.is_symlink():
+                    unit_path.unlink()
+                unit_path.parent.mkdir(parents=True, exist_ok=True)
+                unit_path.symlink_to(Path("/dev/null"))
 
     def _detect_desktop_session(self) -> str:
         session = self.config.get("desktop_session") or self.config.get("desktop")
@@ -339,6 +366,100 @@ class SystemCustomizer:
                 "Homepage=https://flathub.org/\n"
             )
 
+    def configure_network_sharing(self):
+        """Install conservative SMB defaults for Linux/Windows interoperability."""
+        if self.chroot.mode == "mock":
+            return
+        samba_conf = self.target_root / "etc" / "samba" / "smb.conf"
+        if not samba_conf.parent.exists() and not (self.target_root / "usr" / "sbin" / "smbd").exists():
+            return
+        samba_conf.parent.mkdir(parents=True, exist_ok=True)
+        if samba_conf.exists() and samba_conf.stat().st_size > 0:
+            return
+        samba_conf.write_text(
+            "[global]\n"
+            "   workgroup = WORKGROUP\n"
+            "   server string = Deb-Dev-Builder\n"
+            "   server role = standalone server\n"
+            "   security = user\n"
+            "   map to guest = Bad User\n"
+            "   obey pam restrictions = yes\n"
+            "   unix extensions = yes\n"
+            "   min protocol = SMB2\n"
+            "   mdns name = mdns\n"
+            "   load printers = no\n"
+            "   printing = cups\n"
+            "\n"
+            "[homes]\n"
+            "   comment = Home Directories\n"
+            "   browseable = no\n"
+            "   read only = no\n"
+            "   valid users = %S\n"
+        )
+
+    def configure_plymouth_theme(self):
+        """Select the bundled Plymouth theme and include it in initramfs."""
+        if self.chroot.mode == "mock":
+            return
+        theme_dir = self.target_root / "usr/share/plymouth/themes/deb-dev-modern"
+        if not theme_dir.is_dir():
+            return
+        selector = self.target_root / "usr/sbin/plymouth-set-default-theme"
+        if selector.exists():
+            result = self.chroot.run_in_chroot(
+                ["plymouth-set-default-theme", "-R", "deb-dev-modern"], check=False
+            )
+            if result.returncode != 0:
+                logger.warning("Could not activate deb-dev-modern Plymouth theme")
+
+    def configure_grub_theme(self):
+        """Persist the bundled GRUB theme for the installed system."""
+        if self.chroot.mode == "mock":
+            return
+        if self.config.get("base_distro", "debian") not in {"debian", "devuan"}:
+            return
+        bootloader = self.config.get("bootloader_type") or self.config.get("bootloader", {}).get("type", "")
+        if bootloader and "grub" not in str(bootloader).lower():
+            return
+        theme_file = self.target_root / "boot/grub/themes/deb-dev-modern/theme.txt"
+        if not theme_file.is_file():
+            return
+        grub_defaults = self.target_root / "etc/default/grub"
+        grub_defaults.parent.mkdir(parents=True, exist_ok=True)
+        lines = grub_defaults.read_text(encoding="utf-8").splitlines() if grub_defaults.exists() else []
+        settings = {
+            "GRUB_THEME": '"/boot/grub/themes/deb-dev-modern/theme.txt"',
+            "GRUB_GFXMODE": '"auto"',
+            "GRUB_TERMINAL_OUTPUT": '"gfxterm"',
+        }
+        replaced = set()
+        output = []
+        for line in lines:
+            key = line.split("=", 1)[0].strip() if "=" in line else ""
+            if key in settings:
+                output.append(f"{key}={settings[key]}")
+                replaced.add(key)
+            else:
+                output.append(line)
+        for key, value in settings.items():
+            if key not in replaced:
+                output.append(f"{key}={value}")
+        grub_defaults.write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
+
+    def prepare_lightdm_runtime(self):
+        """Create runtime paths expected by LightDM in a live rootfs."""
+        if self.chroot.mode == "mock" or not self.config.get("display_manager"):
+            return
+        lightdm_data = self.target_root / "var" / "lib" / "lightdm" / "data"
+        lightdm_data.mkdir(parents=True, exist_ok=True)
+        # systemd-tmpfiles normally creates utmp, but live boots can reach
+        # LightDM before that hook has run.
+        utmp = self.target_root / "var" / "run" / "utmp"
+        utmp.parent.mkdir(parents=True, exist_ok=True)
+        if not utmp.exists():
+            utmp.touch()
+            utmp.chmod(0o664)
+
     def configure_polkit_power(self):
         if self.chroot.mode == "mock":
             return
@@ -357,6 +478,19 @@ class SystemCustomizer:
         )
         with open(rule_file, "w") as f:
             f.write(rule_content)
+
+        # Synaptic is launched through pkexec.  Live users have no password
+        # by design, so allow only this package-manager action for an active
+        # local user who is already in the administrative sudo group.
+        synaptic_rule = polkit_dir / "20-synaptic-live-user.rules"
+        synaptic_rule.write_text(
+            "polkit.addRule(function(action, subject) {\n"
+            "    if (action.id === 'com.ubuntu.pkexec.synaptic' &&\n"
+            "        subject.active && subject.local && subject.isInGroup('sudo')) {\n"
+            "        return polkit.Result.YES;\n"
+            "    }\n"
+            "});\n"
+        )
 
     def configure_calamares(self):
         if self.chroot.mode == "mock":
@@ -549,10 +683,16 @@ class SystemCustomizer:
 
         if (self.target_root / "usr" / "sbin" / "update-initramfs").exists():
             try:
-                self.chroot.run_in_chroot(["update-initramfs", "-c", "-k", "all"], check=False)
-                self.chroot.run_in_chroot(["update-initramfs", "-u", "-k", "all"], check=False)
+                result = self.chroot.run_in_chroot(["update-initramfs", "-u", "-k", "all"], check=False)
+                if result.returncode != 0:
+                    raise RuntimeError(f"update-initramfs exited with code {result.returncode}")
+                kernel_files = list((self.target_root / "boot").glob("vmlinuz-*"))
+                initrd_files = list((self.target_root / "boot").glob("initrd.img-*"))
+                if kernel_files and not initrd_files:
+                    raise RuntimeError("no initrd.img-* was produced for the installed kernel")
             except Exception as e:
-                logger.warning("Could not update initramfs: %s", e)
+                logger.error("Could not update initramfs: %s", e)
+                raise
 
     def configure_dbus_launch(self):
         if self.chroot.mode == "mock":
@@ -588,15 +728,19 @@ class SystemCustomizer:
         self.configure_system_defaults()
         self.configure_dbus_launch()
         self.configure_branding()
+        self.prepare_lightdm_runtime()
         self.setup_services()
         self.configure_autologin()
         self.configure_zram()
         self.configure_flathub()
+        self.configure_network_sharing()
+        self.configure_plymouth_theme()
+        self.configure_grub_theme()
         self.configure_polkit_power()
         self.configure_calamares()
         self.configure_artwork()
         self.copy_custom_files()
-        if self.config.get("with_offline_repo") or self.config.get("offline_repo_packages"):
+        if self.config.get("with_offline_repo"):
             self.configure_offline_repository()
         self.configure_machine_id()
         self.fix_home_permissions()
@@ -610,7 +754,6 @@ class SystemCustomizer:
         repo_content = (
             "# Offline Debian/Devuan Live ISO Repository\n"
             "deb [trusted=yes] file:/run/live/medium/repo/ ./\n"
-            "deb [trusted=yes] file:/media/cdrom/repo/ ./\n"
         )
         (sources_d / "offline-iso.list").write_text(repo_content)
         logger.info("Configured Debian offline ISO repository in /etc/apt/sources.list.d/offline-iso.list")
@@ -619,7 +762,7 @@ class SystemCustomizer:
         if self.chroot.mode == "mock":
             return
         system_config = self.config.get("system", {})
-        locale = self.config.get("locale", system_config.get("locale", "pt_PT.UTF-8"))
+        locale = self.config.get("locale", system_config.get("locale", "en_US.UTF-8"))
         locales = list(dict.fromkeys([locale, "en_US.UTF-8"]))
         logger.info("🌐 Configuring locales: %s", ", ".join(locales))
         try:
@@ -693,15 +836,54 @@ class SystemCustomizer:
         custom_files_dir = project_root / "configs" / "custom_files"
 
         if custom_files_dir.exists() and custom_files_dir.is_dir():
-            for item in custom_files_dir.iterdir():
-                if item.name == ".gitkeep":
+            # ``custom_files`` is a semantic overlay, not a raw copy into the
+            # chroot root. Keep conventional Unix trees (etc/, usr/, boot/)
+            # rooted, and map project-specific asset groups to their package
+            # locations. Unknown groups are kept under /usr/local/share so a
+            # typo can never create an unexpected /<name> directory.
+            destination_prefixes = {
+                "backgrounds": Path("usr/share/backgrounds"),
+                "dconf": Path("etc/dconf"),
+                "autostart": Path("etc/xdg/autostart"),
+                "applications": Path("usr/share/applications"),
+                "lightdm": Path("etc/lightdm"),
+                "sddm": Path("etc/sddm"),
+                "default": Path("etc/default"),
+                "scripts": Path("usr/local/bin"),
+                "samba": Path("etc/samba"),
+                "sudoers.d": Path("etc/sudoers.d"),
+                "calamares": Path("etc/calamares"),
+                "grub": Path("boot/grub"),
+                "desktops": Path("etc/skel"),
+            }
+
+            for source in custom_files_dir.rglob("*"):
+                if not source.is_file() or source.name == ".gitkeep":
                     continue
-                dest_path = self.target_root / item.name
-                if item.is_dir():
-                    shutil.copytree(item, dest_path, dirs_exist_ok=True, symlinks=True, ignore_dangling_symlinks=True)
+                relative = source.relative_to(custom_files_dir)
+                group = relative.parts[0]
+                if group == "calamares" and len(relative.parts) > 2 and relative.parts[1] in {"systemd", "non-systemd"}:
+                    selector = relative.parts[1]
+                    init_system = str(self.config.get("init_system", "systemd")).lower()
+                    if (selector == "systemd") != (init_system == "systemd"):
+                        continue
+                    relative = Path("calamares") / Path(*relative.parts[2:])
+                if group == "plymouth":
+                    if relative == Path("plymouth/plymouthd.conf"):
+                        destination = Path("etc/plymouth/plymouthd.conf")
+                    elif len(relative.parts) > 2 and relative.parts[1] == "themes":
+                        destination = Path("usr/share/plymouth") / Path(*relative.parts[1:])
+                    else:
+                        destination = Path("usr/share/plymouth") / Path(*relative.parts[1:])
+                elif group in {"etc", "usr", "var", "boot", "home", "root", "opt", "bin", "sbin", "lib", "lib64"}:
+                    destination = relative
+                elif group in destination_prefixes:
+                    destination = destination_prefixes[group] / Path(*relative.parts[1:])
                 else:
-                    dest_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(item, dest_path)
+                    destination = Path("usr/local/share/deb-dev-builder/custom-files") / relative
+                dest_path = self.target_root / destination
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, dest_path)
 
         custom_files_list = list(self.config.get("custom_files", []))
         base_copy_files = self.config.get("base_copy_files", [])

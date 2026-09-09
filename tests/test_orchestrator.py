@@ -41,6 +41,37 @@ class TestOrchestrator:
         assert orch.config["live_user"]["name"] == "demo"
         assert "flatpak" in orch.config["software"]
 
+    def test_desktop_live_build_gets_complete_runtime_profiles(self):
+        orch = make_orchestrator(desktop="xfce", variant="live")
+        assert {
+            "filesystems", "networking", "network-shares", "printing",
+            "security", "system-utils", "multimedia", "firmware",
+        } <= set(orch.package_profiles)
+        assert "pipewire" in orch.package_profiles
+        assert "desktop-utils" in orch.package_profiles
+        assert "update-tools" in orch.package_profiles
+        assert "synaptic" in orch.config["software"]
+        assert {"vlc", "cups", "samba", "pciutils", "gvfs-backends", "gvfs-fuse"} <= set(orch.config["software"])
+
+    def test_pulseaudio_profile_replaces_pipewire_default(self):
+        orch = make_orchestrator(desktop="xfce", variant="live", package_profiles=["pulseaudio"])
+        assert "pulseaudio" in orch.config["software"]
+        assert "pipewire" not in orch.config["software"]
+
+    def test_non_live_build_keeps_optional_desktop_profiles_out(self):
+        orch = make_orchestrator(desktop="xfce", variant="minimal")
+        assert "network-shares" not in orch.package_profiles
+        assert "samba" not in orch.config["software"]
+
+    def test_kde_uses_its_native_update_frontend(self):
+        orch = make_orchestrator(desktop="kde", variant="live")
+        assert "update-tools" not in orch.package_profiles
+
+    def test_non_graphical_build_does_not_install_synaptic(self):
+        orch = make_orchestrator(variant="live")
+        assert "desktop-utils" not in orch.package_profiles
+        assert "synaptic" not in orch.config["software"]
+
     def test_mock_build_debian(self, tmp_path):
         orch = make_orchestrator(tmp_path=tmp_path, distro="debian-12", desktop="gnome")
         result = orch.build()

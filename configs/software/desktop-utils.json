@@ -1,0 +1,8 @@
+{
+  "packages": [
+    "desktop-base",
+    "synaptic",
+    "lsb-release",
+    "xdg-user-dirs-gtk"
+  ]
+}

@@ -113,13 +113,13 @@ def main():
         dest="clean",
         action="store_true",
         default=True,
-        help="Remove target work directory before real build (default).",
+        help="Remove the target work directory before and after a real build (default).",
     )
     parser.add_argument(
         "--no-clean",
         dest="clean",
         action="store_false",
-        help="Reuse existing real-build work directory.",
+        help="Preserve and reuse the real-build work directory.",
     )
     parser.add_argument(
         "--force-isolated-toolchain",

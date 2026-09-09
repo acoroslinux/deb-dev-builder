@@ -1,0 +1,50 @@
+Changelog for JGD-Black
+
+09/03/19
+Fixed stripes on progressbars in both standard and dark themes.
+
+10/24/18
+Changes for rubberband background color; small fix for label hover color in headerbar.
+
+10/17/2018
+Changes in headerbar to fix flat buttons; slight color change to reduce contrast in titles. Applied a foreground color to all buttons (I can't believe I overlooked that!).
+
+10/15/2018
+Fixed rendering issues in LibreOffice (black background behind combobox drop-down menus, rulers), Fixed font legibility issues in dconf editor, etc.
+
+11/7/2017
+New changes: Transparency given to background for disabled entry boxes and disabled scales in light/dark variants. Spinbutton disabled images were given a dim effect.
+
+Added visibility and styling for the marks under the scale slider. Added a highlight color to the scale. Both in the light and dark variants.
+
+11/4/2017
+Added diagonal striping to the progressbars in the light and dark theme variants.
+
+11/3/2017
+Continued development of the dark theme. Renamed and added several new variables for the color scheme, to make semantic sense.
+
+10/30/2017 to 10/31/2017
+Started developing a dark version with the gtk-dark.css file.
+
+Removed some padding around treeview rows.
+
+Specified styling that removes this theme's default button style around csd buttons for close, maximize, minimize and .popup only.
+
+Added a new blue background color (link color) for the background of suggested action buttons.
+
+10/27/2017
+Fixed labels/links to be visible in backdrop for the Pathbar Box (.pathbar) inside of the headerbar.
+
+Added a 3px padding around client side decorated windows to make resizing possible and easier.
+
+Removed 1px border from frame object to remove extraneous frames.
+
+Fixed buttons inside of headerbars to have a minimum width and margins on the top/bottom. Introduced a new maximize icon for windows not maximized and placed previous icon (maximized.png) as a background-image when a window is maximized (with the .maximized class on a csd window).
+
+Fixed revealer outside of stacksidebar by using more specific styling for revealers inside of an overlay.
+
+Made headerbar/dialog box titles bold by using CSS font-weight property.
+
+Styled arrows inside notebook headers for a more cohesive look.
+
+Changed csd button image hover color to match with the Openbox theme button color.

@@ -4,12 +4,15 @@
     "sudo",
     "bash",
     "coreutils",
+    "util-linux",
+    "util-linux-extra",
     "iproute2",
     "iputils-ping",
     "curl",
     "wget",
     "zstd",
     "locales",
-    "ca-certificates"
+    "ca-certificates",
+    "base-files"
   ]
 }

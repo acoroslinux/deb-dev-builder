@@ -1,0 +1,1457 @@
+/* JGD-Black- GTK+3.20 version */
+/* Widgets */
+
+/* Overall styles */
+* {
+	background-clip: padding-box;
+	font-family: "DejaVu Sans Condensed", sans-serif;
+	font-stretch: condensed;
+	-GtkIMHtml-hyperlink-color: @theme_link_color;
+	-GtkHTML-link-color: @theme_link_color;
+	-gtk-icon-style: requested;
+	outline-color: @theme_border_color;
+	outline-style: dotted;
+	outline-offset: -3px;
+	outline-width: 1px;
+}
+
+*:selected {
+	background-color: @theme_selected_bg_color;
+	color: @theme_selected_fg_color;
+}
+
+*:disabled {
+	color: @theme_disabled_color;
+}
+
+window,
+window.popup,
+.background {
+	background-color: @theme_bg_color;
+	color: @theme_fg_color;
+}
+
+window decoration {
+	background-color: @theme_window_bg_color;
+	padding: 3px;
+}
+
+headerbar:backdrop,
+window decoration:backdrop,
+dialog decoration:backdrop {
+	background-color: @theme_window_backdrop_bg_color;
+	color: @black;
+}
+
+dialog.csd decoration,
+window.csd decoration {
+	box-shadow: 4px 4px 4px 0px rgba(0, 0, 0, 0.25);
+}
+
+.popup decoration, /* Right-click menus */
+.csd.popup decoration, /* Right-click menus */
+combobox window decoration,
+menuitem window decoration,
+scrolledwindow window decoration,
+scrolledwindow window.csd decoration,
+treeview window decoration {
+	padding: 0px;
+}
+
+selection,
+label selection {
+	background-color: @theme_selected_bg_color;
+	color: @theme_selected_fg_color;
+}
+
+/* Shared styles */
+button,
+combobox button,
+combobox entry,
+entry {
+	padding: 3px;
+}
+
+button,
+button.flat:hover,
+spinbutton,
+combobox button,
+combobox entry,
+scrollbar trough {
+	background-color: @theme_button_bg_color;
+}
+
+button,
+button.flat:hover,
+spinbutton,
+entry,
+textview,
+progressbar,
+scale trough,
+scale slider,
+scrollbar button,
+scrollbar,
+scrollbar trough slider,
+levelbar trough,
+switch,
+switch slider,
+calendar.view {
+	border: 1px solid @theme_border_color;
+}
+
+button,
+combobox button,
+entry,
+spinbutton,
+progressbar,
+scale slider,
+notebook,
+tab,
+filechooser scrolledwindow,
+placessidebar,
+switch,
+switch slider,
+popover,
+calendar.view {
+	border-radius: 3px;
+}
+
+entry,
+combobox entry,
+textview /* Textview styles Firefox's address, search and address dropdown */ {
+	background-color: @theme_base_color;
+	color: @theme_fg_color;
+}
+
+button,
+button.flat:hover,
+menubar > menuitem:active,
+menuitem:hover,
+scale.horizontal slider,
+treeview:selected,
+treeview:hover,
+placessidebar row:selected,
+placessidebar row:hover,
+switch slider {
+	background-image: linear-gradient(to bottom,
+		rgba(255, 255, 255, 0) 0%,
+		rgba(0, 0, 0, 0) 49%,
+		rgba(0, 0, 0, 0.10) 50%,
+		rgba(0, 0, 0, 0) 100%);
+}
+
+/* Buttons/Spin Buttons/Checkboxes/Radios */
+button {
+	color: @theme_fg_color;
+}
+
+buttonbox button {
+	margin: 3px;
+}
+
+button:checked,
+button:hover,
+button.flat:hover,
+progressbar,
+scale trough {
+	background-color: @theme_button_bg_hover_color;
+}
+
+button:focus,
+spinbutton:focus,
+scale slider:focus {
+	border-color: @theme_focus_border_color;
+}
+
+button.toggle:focus {
+	background-color: @theme_button_bg_color;
+}
+
+button.toggle:focus:checked {
+	background-color: @theme_button_bg_hover_color;
+}
+
+button:active,
+button:active:checked {
+	background-color: @theme_button_bg_active_color;
+}
+
+button:disabled,
+button image:disabled,
+button.image-button:disabled box,
+button label:disabled,
+combobox box:disabled,
+combobox box arrow:disabled,
+entry:disabled {
+	background-color: transparent;
+}
+
+button.image-button:disabled,
+button.popup:disabled image {
+	-gtk-icon-effect: dim;
+	background-image: none;
+}
+
+button.flat {
+	border: 1px solid transparent;
+	background-color: transparent;
+	background-image: none;
+}
+
+button.flat image, /* This makes some images show up with the foreground color */
+iconview {
+	-gtk-icon-style: requested;
+}
+
+button label {
+	padding: 0px 3px;
+}
+
+button.link {
+	background-color: transparent;
+	background-image: none;
+	border-style: none;
+	color: @theme_link_color;
+	text-decoration: underline;
+}
+
+button.circular {
+	border-radius: 50%;
+}
+
+combobox button {
+	border: 1px solid @theme_border_color;
+}
+
+combobox button:focus {
+	outline-style: solid;
+	-gtk-outline-radius: 3px;
+}
+
+combobox entry + button {
+	border-top: 1px solid @theme_border_color;
+	border-right: 1px solid @theme_border_color;
+	border-bottom: 1px solid @theme_border_color;
+	border-left: none;
+	border-top-left-radius: 0px;
+	border-bottom-left-radius: 0px;
+}
+
+spinbutton {
+	padding: 0 0 0 6px;
+	box-shadow: inset 1px 1px 1px rgba(0, 0, 0, 0.10);
+}
+
+spinbutton button:active:focus {
+	background-color: @theme_button_bg_active_color;
+}
+
+spinbutton button:disabled {
+	-gtk-icon-effect: dim;
+}
+
+spinbutton.horizontal button {
+	border-radius: 0;
+	border-top-style: none;
+	border-bottom-style: none;
+	margin: 0px;
+}
+
+spinbutton.horizontal button.down,
+spinbutton.horizontal button.up {
+	border-right-style: none;
+}
+
+spinbutton.vertical {
+	padding: 0px;
+}
+
+spinbutton.vertical button {
+	margin: 0px;
+	border-radius: 0px;
+}
+
+spinbutton.vertical button.up {
+	border-top-style: none;
+	border-right-style: none;
+	border-left-style: none;
+}
+
+spinbutton.vertical button.down {
+	border-right-style: none;
+	border-bottom-style: none;
+	border-left-style: none;
+}
+
+spinbutton entry {
+	border-style: none;
+	box-shadow: none;
+}
+
+notebook header tab button,
+notebook header tab button.flat {
+	background-color: @notebook_tab_button_bg;
+	border: 1px solid @notebook_tab_button_border;
+}
+
+notebook header tab:hover button,
+notebook header tab:hover button.flat {
+	background-color: @notebook_tab_button_bg_hover;
+	border: 1px solid @notebook_tab_button_border_hover;
+}
+
+notebook button.popup {
+	margin: 3px;
+}
+
+notebook header tab:checked button {
+	background-color: @notebook_tab_button_bg_checked;
+}
+
+notebook header tab:checked:hover button {
+	background-color: @notebook_tab_button_bg_checked_hover;
+}
+
+popover button {
+	color: @theme_fg_color;
+}
+
+popover modelbutton {
+	padding: 3px 6px;
+}
+
+popover modelbutton:hover {
+	background-color: @theme_selected_bg_color;
+}
+
+window decoration,
+headerbar {
+	border-top-left-radius: 3px;
+	border-top-right-radius: 3px;
+}
+
+headerbar button {
+	color: @theme_fg_color;
+	margin-top: 3px;
+	margin-bottom: 3px;
+	min-width: 20px;
+}
+
+headerbar button:hover {
+	background-color: @headerbar_button_bg_hover;
+}
+
+headerbar button.close,
+headerbar button.maximize,
+headerbar button.minimize {
+	margin: 0 -3px;
+}
+
+headerbar button.flat,
+headerbar button.flat label {
+	color: @theme_fg_color_dark;
+}
+
+headerbar button label {
+	color: @theme_fg_color;
+	font-weight: normal;
+}
+
+headerbar stackswitcher button {
+	background-color: @headerbar_stackswitcher_button_bg;
+	margin: 0 3px 0 3px;
+}
+
+headerbar stackswitcher button:checked,
+headerbar stackswitcher button:hover {
+	background-color: @headerbar_button_bg_hover;
+	color: @theme_fg_color;
+}
+
+toolbar button {
+	margin: 2px;
+	padding: 3px 6px;
+}
+
+/* Path bar inside window- denoted by class .path-bar */
+.path-bar button {
+	margin: 0px 6px;
+	padding: 0px;
+}
+
+.path-bar button image,
+.path-bar .slider-button {
+	margin: 0px 6px;
+}
+
+.path-bar button.image-button,
+.path-bar button.text-button,
+.path-bar button.toggle {
+	background-image: none;
+	background-color: transparent;
+	border-style: none;
+}
+
+.path-bar button.image-button image {
+	padding-bottom: 6px;
+	padding-top: 4px;
+	border-bottom: 2px solid transparent;
+}
+
+.path-bar button.image-button:checked image {
+	border-bottom: 2px solid @theme_border_color;
+}
+
+.path-bar button.image-button:hover image {
+	border-bottom: 2px solid @theme_border_color_highlight;
+}
+
+.path-bar button.toggle:checked label,
+.path-bar button.toggle.image-button:checked label,
+.path-bar button.toggle.text-button:checked label {
+	border-bottom: 2px solid @theme_border_color;
+}
+
+.path-bar button.toggle label,
+.path-bar button.toggle.image-button label,
+.path-bar button.toggle.text-button label {
+	border-bottom: 2px solid transparent; /* Set border the same thickness as hover to avoid jumping as a result of uneven heights */
+}
+
+.path-bar button.toggle:hover label,
+.path-bar button.toggle.image-button:hover label,
+.path-bar button.toggle.text-button:hover label {
+	border-bottom: 2px solid @theme_border_color_highlight;
+}
+/* */
+
+/* Path bar inside CSD window, noted by class .pathbar */
+headerbar .pathbar,
+headerbar .pathbar button label {
+	color: @pathbar_label_fg_color;
+}
+
+headerbar .pathbar:backdrop,
+headerbar .pathbar:backdrop button label {
+	color: @theme_selected_fg_color;
+}
+
+headerbar .pathbar button {
+	color: @pathbar_label_fg_color;
+}
+
+headerbar .pathbar button label {
+	border-bottom-color: @theme_border_color;
+}
+
+headerbar .pathbar button.active label {
+	border-bottom-color: @theme_selected_fg_color;
+	color: @theme_selected_fg_color;
+}
+
+actionbar button {
+	margin: 3px 0px;
+}
+
+treeview button {
+	border-top-style: none;
+	border-right-style: none;
+	border-bottom: 1px solid @theme_border_color_highlight;
+	border-left-style: none;
+	border-radius: 0px;
+	margin: 0px;
+}
+
+/* Checkboxes/Radios, see gtk-widgets-assets.css */
+
+button.destructive-action,
+button.destructive-action:focus { /* Record buttons/etc. */
+	background-color: @error_color;
+	color: @theme_selected_fg_color;
+}
+
+button.destructive-action image:selected {
+	background-color: @error_color;
+	color: @theme_base_color;
+}
+
+button.destructive-action:disabled {
+	background-color: transparent;
+}
+
+button.suggested-action {
+	background-color: @suggested_color;
+}
+
+button.suggested-action:disabled {
+	background-color: rgba(255, 255, 255, 0.5);
+}
+
+button.suggested-action label {
+	color: @theme_button_suggested_fg_color;
+}
+
+button.suggested-action:hover label {
+	color: @theme_fg_color;
+}
+
+button.suggested-action label:disabled {
+	color: @theme_disabled_color;
+}
+
+/* Toolbars/Menus */
+toolbar,
+actionbar {
+	padding: 3px;
+}
+
+toolbar.horizontal.primary-toolbar {
+	border-bottom: 1px solid @theme_border_color_highlight;
+}
+
+headerbar {
+	background-color: @headerbar_bg_color;
+	border-top-left-radius: 3px;
+	border-top-right-radius: 3px;
+	padding: 6px;
+}
+
+/* see gtk-widgets-assets.css for client side window decorations */
+
+headerbar label {
+	color: @theme_fg_color_dark;
+	font-family: "DejaVu Sans Condensed", sans-serif;
+	font-stretch: condensed;
+	font-weight: bold;
+}
+
+headerbar separator {
+	border-color: rgba(255, 255, 255, 0.5);
+}
+
+headerbar separator.vertical {
+	margin: 0px 6px;
+}
+
+menu {
+	background-color: @theme_base_color;
+	border: 1px solid @menu_border_color;
+}
+
+menu separator,
+.menu separator,
+menuitem separator {
+	border: 1px solid @theme_border_color_highlight;
+}
+
+menubar {
+	background-color: @menubar_bg_color;
+	color: @theme_selected_fg_color;
+	border-style: none;
+}
+
+menubar:backdrop {
+	background-color: @menubar_backdrop_bg_color;
+}
+
+menuitem,
+menubar menuitem,
+.menu menuitem {
+	padding: 3px 6px;
+}
+
+menubar menuitem:hover {
+	background-color: @menubar_bg_color_hover;
+	border-color: transparent;
+}
+
+menuitem:hover,
+menu menuitem:hover {
+	background-color: @menuitem_bg_color_hover;
+	color: @theme_selected_fg_color;
+	border: 1px solid @theme_border_color_shade;
+}
+
+menubar > menuitem > label {
+	margin: 0px;
+}
+
+menuitem > label {
+	margin-right: 6px;
+}
+
+menubar menuitem menuitem { /* two levels deep */
+	background-color: @theme_base_color;
+	color: @theme_fg_color;
+	padding: 3px 12px;
+	border: 1px solid transparent;
+}
+
+menubar > menuitem {
+	border-top-left-radius: 3px;
+	border-top-right-radius: 3px;
+}
+
+menuitem {
+	border: 1px solid transparent;
+}
+
+menuitem:disabled {
+	background-color: @theme_disabled_bg_color;
+}
+
+combobox window decoration,
+combobox window.csd decoration,
+menuitem window decoration,
+menuitem window.csd decoration,
+.popup decoration, /* For right-click menus */
+.csd.popup decoration,
+scrolledwindow window decoration,
+scrolledwindow window.csd decoration,
+treeview window decoration,
+popover {
+	box-shadow: 3px 3px 3px 0px rgba(0, 0, 0, 0.25);
+}
+
+menubar menuitem decoration {
+	border-top-style: none;
+}
+
+menu menuitem arrow {
+	-gtk-icon-source: -gtk-icontheme("pan-end-symbolic");
+}
+
+menu menuitem arrow {
+	min-height: 12px;
+	min-width: 12px;
+	margin-left: 12px;
+	color: @theme_fg_color;
+}
+
+
+/* menu menuitem:hover menuitem arrow shows arrow for second level+ menus; */
+/* when first menuitem is hovered, the second menuitem arrow color will show as first menuitem hover color (white), as it is nested. */
+/* Thus, we need to set second level hover > arrow to @theme_fg_color */
+menu menuitem:hover arrow,
+menu menuitem:hover menuitem:hover arrow {
+	color: @theme_selected_fg_color;
+}
+
+menu menuitem:hover menuitem arrow {
+	color: @theme_fg_color;
+}
+
+menuitem menuitem accelerator {
+	margin-left: 12px;
+}
+
+.context-menu {
+	background-color: @theme_base_color;
+	font: initial;
+}
+
+/* Combobox/Entry */
+combobox {
+	background-color: transparent;
+}
+
+entry {
+	margin: 1px 3px;
+	box-shadow: inset 1px 1px 1px rgba(0, 0, 0, 0.10);
+}
+
+entry:focus {
+	border-color: @theme_focus_border_color;
+}
+
+entry image {
+	margin: 0px 3px;
+}
+
+entry image,
+entry image:disabled {
+	background-color: transparent;
+}
+
+.horizontal combobox {
+	margin: 0px 3px 0px 3px;
+}
+
+combobox .cell:hover {
+	color: @theme_fg_color;
+}
+
+combobox cellview:disabled {
+	background-color: transparent;
+}
+
+combobox entry {
+	background-color: @theme_base_color;
+	border: 1px solid @theme_border_color;
+	border-top-right-radius: 0px;
+	border-bottom-right-radius: 0px;
+	margin: 0px;
+}
+
+combobox arrow {
+	-gtk-icon-source: -gtk-icontheme("pan-down-symbolic");
+	color: @theme_fg_color;
+	min-height: 16px;
+	min-width: 16px;
+}
+
+combobox menuitem {
+	background-color: @theme_base_color;
+}
+
+/* Notebook/Tabs */
+notebook {
+	padding: 0;
+	background-clip: border-box;
+	background-color: @theme_base_color;
+	border: 1px solid @theme_border_color;
+}
+
+viewport,
+notebook viewport {
+	background-color: @theme_base_color;
+}
+
+notebook tab {
+	background-color: @tab_bg_color;
+	border: 1px solid @theme_border_color;
+	color: @tab_fg_color;
+	padding: 3px 6px;
+}
+
+notebook tab label {
+	padding: 0 6px;
+}
+
+notebook header {
+	background-color: @notebook_header_bg_color;
+}
+
+notebook header.top {
+	border-bottom: 1px solid @tab_highlight;
+	padding-top: 6px;
+	padding-left: 6px;
+	padding-right: 6px;
+}
+
+notebook header.right {
+	border-left: 1px solid @tab_shadow;
+	padding-right: 6px;
+
+}
+
+notebook header.bottom {
+	border-top: 1px solid @tab_shadow;
+	padding-right: 6px;
+	padding-bottom: 6px;
+	padding-left: 6px;
+}
+
+notebook header.left {
+	border-right: 1px solid @tab_highlight;
+	padding-left: 6px;
+}
+
+notebook header.top tab,
+notebook header.top tabs > arrow {
+	border-radius: 3px 3px 0px 0px;
+	border-top: 1px solid @tab_highlight;
+	border-right: 1px solid @tab_shadow;
+	border-left: 1px solid @tab_highlight;
+	margin-top: 3px;
+	margin-left: -1px;
+	padding: 4px 6px 3px 6px;
+}
+
+notebook header.right tab,
+notebook header.right tabs > arrow {
+	border-radius: 0px 3px 3px 0px;
+	border-top: 1px solid @tab_highlight;
+	border-right: 1px solid @tab_shadow;
+	border-bottom: 1px solid @tab_shadow;
+	margin-right: 3px;
+	margin-top: -1px;
+	padding: 6px;
+}
+
+notebook header.bottom tab,
+notebook header.bottom tabs > arrow {
+	border-radius: 0px 0px 3px 3px;
+	border-right: 1px solid @tab_shadow;
+	border-bottom: 1px solid @tab_shadow;
+	border-left: 1px solid @tab_highlight;
+	margin-bottom: 3px;
+	margin-left: -1px;
+	padding: 3px 6px 4px 6px;
+}
+
+notebook header.left tab,
+notebook header.left tabs > arrow {
+	border-radius: 3px 0px 0px 3px;
+	border-top: 1px solid @tab_highlight;
+	border-bottom: 1px solid @tab_shadow;
+	border-left: 1px solid @tab_highlight;
+	margin-left: 3px;
+	margin-top: -1px;
+	padding: 6px 6px 6px 6px;
+}
+
+notebook header tab:checked {
+	background-color: @theme_base_color;
+	color: @theme_fg_color;
+	outline: none;
+}
+
+notebook header.top tab:checked {
+	background-image: linear-gradient(to bottom,
+		rgba(0, 0, 0, 0.25) 0%,
+		rgba(0, 0, 0, 0) 100%);
+	border-bottom-style: none;
+	border-top-color: @theme_fg_color;
+	border-left-color: @theme_border_color;
+	margin-bottom: -2px;
+	margin-top: 0px;
+	padding-top: 7px;
+}
+
+notebook header.right tab:checked {
+	background-image: linear-gradient(to left,
+		rgba(0, 0, 0, 0.25) 0%,
+		rgba(0, 0, 0, 0) 100%);
+	border-left-style: none;
+	border-top-color: @theme_border_color;
+	border-right-color: @theme_fg_color;
+	margin-left: -2px;
+	margin-right: 0px;
+	padding-right: 7px;
+}
+
+notebook header.bottom tab:checked {
+	background-image: linear-gradient(to top,
+		rgba(0, 0, 0, 0.25) 0%,
+		rgba(0, 0, 0, 0) 100%);
+	border-top-style: none;
+	border-bottom-color: @theme_fg_color;
+	border-left-color: @theme_border_color;
+	margin-bottom: 0px;
+	margin-top: -2px;
+	padding-bottom: 7px;
+}
+
+notebook header.left tab:checked {
+	background-image: linear-gradient(to right,
+		rgba(0, 0, 0, 0.25) 0%,
+		rgba(0, 0, 0, 0) 100%);
+	border-right-style: none;
+	border-top-color: @theme_border_color;
+	border-left-color: @theme_fg_color;
+	margin-left: 0px;
+	margin-right: -2px;
+	padding-left: 7px;
+}
+
+notebook > header > tabs > arrow {
+	background-color: @tab_bg_color;
+}
+
+notebook > header > tabs > arrow:disabled {
+	background-color: transparent;
+	border-color: @notebook_tab_button_border_disabled;
+}
+
+notebook > header.top > tabs > arrow.up,
+notebook > header.bottom > tabs > arrow.up,
+notebook > header.top > tabs > arrow.down,
+notebook > header.bottom > tabs > arrow.down {
+	padding: 0px 12px;
+}
+
+notebook > header.left > tabs > arrow.up,
+notebook > header.right > tabs > arrow.up,
+notebook > header.left > tabs > arrow.down,
+notebook > header.right > tabs > arrow.down {
+	padding: 6px 0;
+}
+
+notebook > header.top > tabs > arrow.up:disabled,
+notebook > header.bottom > tabs > arrow.up:disabled,
+notebook > header.top > tabs > arrow.down:disabled,
+notebook > header.bottom > tabs > arrow.down:disabled,
+notebook > header.left > tabs > arrow.up:disabled,
+notebook > header.right > tabs > arrow.up:disabled,
+notebook > header.left > tabs > arrow.down:disabled,
+notebook > header.right > tabs > arrow.down:disabled {
+	-gtk-icon-effect: dim;
+}
+
+/* Treeview */
+treeview header button label {
+	padding-right: 6px;
+}
+
+paned .view {
+	background-color: transparent;
+}
+
+treeview,
+view,
+.view, /* This is used for various LibreOffice backgrounds */
+view text {
+	background-color: @theme_base_color;
+	color: @theme_fg_color;
+}
+
+row:backdrop label {
+	color: @theme_fg_color;
+}
+
+row:backdrop:selected label {
+	color: @theme_selected_fg_color;
+}
+
+.view:selected {
+	background-color: @view_bg_color_selected;
+	color: @theme_selected_fg_color;
+}
+
+.view {
+	padding: 0px 3px;
+}
+
+treemenu menu {
+	background-color: @theme_base_color;
+}
+
+treemenu menu:selected {
+	color: @theme_selected_fg_color;
+}
+
+.cell:selected {
+	background-color: @view_bg_color_selected;
+}
+
+.cell:hover {
+	background-color: @view_bg_color_hover;
+	color: @theme_fg_color;
+}
+
+.cell:disabled:hover {
+	color: @theme_fg_color;
+}
+
+/*view row:nth-child(even) {
+	background-color: @theme_bg_color;
+}*/
+
+treeview.view.expander { /* Down pointing arrow inside of treeview */
+	color: @theme_fg_color;
+}
+
+treeview.view.expander:selected,
+treeview.view.expander:hover {
+	color: @theme_selected_fg_color;
+}
+
+filechooser scrolledwindow,
+placessidebar {
+	border: 1px solid @theme_border_color;
+	margin: 6px;
+}
+
+placessidebar {
+	background-color: @theme_base_color;
+}
+
+placessidebar row:selected {
+	background-color: @view_bg_color_selected;
+}
+
+placessidebar row:hover {
+	background-color: @theme_bg_color;
+}
+
+placessidebar row:selected:hover {
+	color: @theme_fg_color;
+}
+
+placessidebar label,
+placessidebar image.sidebar-icon {
+	padding: 3px 6px;
+}
+
+placessidebar button.sidebar-button {
+	margin: 0px 6px;
+}
+
+/* Scrollbars/Progressbars/Scales */
+scrollbar {
+	background-color: @trough_bg_color;
+}
+
+scrollbar.horizontal {
+	min-height: 14px;
+}
+
+scrollbar.horizontal {
+	min-width: 14px;
+}
+
+scrollbar button {
+	min-width: 8px;
+	min-height: 8px;
+}
+
+scrollbar.horizontal button.down {
+	-gtk-icon-source: -gtk-icontheme("pan-end-symbolic");
+}
+
+scrollbar.horizontal button.up {
+	-gtk-icon-source: -gtk-icontheme("pan-start-symbolic");
+}
+
+scrollbar.vertical button.up {
+	-gtk-icon-source: -gtk-icontheme("pan-up-symbolic");
+}
+
+scrollbar.vertical button.down {
+	-gtk-icon-source: -gtk-icontheme("pan-down-symbolic");
+}
+
+scrollbar trough {
+	background-color: @trough_bg_color;
+}
+
+scrollbar trough slider {
+	background-color: @theme_button_bg_color;
+}
+
+scrollbar.horizontal trough slider {
+	background-image: linear-gradient(to bottom,
+		rgba(255, 255, 255, 0) 0%,
+		rgba(0, 0, 0, 0) 49%,
+		rgba(0, 0, 0, 0.10) 50%,
+		rgba(0, 0, 0, 0) 100%);
+	min-height: 14px;
+	min-width: 10px;
+}
+
+scrollbar.vertical trough slider {
+	background-image: linear-gradient(to right,
+		rgba(255, 255, 255, 0) 0%,
+		rgba(0, 0, 0, 0) 49%,
+		rgba(0, 0, 0, 0.10) 50%,
+		rgba(0, 0, 0, 0) 100%);
+	min-width: 14px;
+	min-height: 10px;
+}
+
+progressbar progress {
+	background-color: @progress_bg_color;
+}
+
+progressbar trough,
+progressbar progress {
+	border-radius: 3px;
+}
+
+progressbar.horizontal trough,
+progressbar.horizontal progress {
+	min-height: 16px;
+}
+
+progressbar.horizontal progress {
+	background-image: linear-gradient(to bottom,
+		rgba(255, 255, 255, 0) 0%,
+		rgba(0, 0, 0, 0) 49%,
+		rgba(0, 0, 0, 0.10) 50%,
+		rgba(0, 0, 0, 0) 100%),
+							repeating-linear-gradient(135deg,
+		rgba(255, 255, 255, .15) 12px,
+		transparent 12px,
+		transparent 24px,
+		rgba(255, 255, 255, .10) 24px,
+		rgba(255, 255, 255, .10) 36px
+	);
+}
+
+progressbar.vertical progress,
+progressbar.vertical trough {
+	min-width: 16px;
+}
+
+progressbar.vertical progress {
+	background-image: linear-gradient(to right,
+		rgba(255, 255, 255, 0) 0%,
+		rgba(0, 0, 0, 0) 49%,
+		rgba(0, 0, 0, 0.10) 50%,
+		rgba(0, 0, 0, 0) 100%),
+							repeating-linear-gradient(45deg,
+		rgba(255, 255, 255, .15) 12px,
+		transparent 12px,
+		transparent 24px,
+		rgba(255, 255, 255, .10) 24px,
+		rgba(255, 255, 255, .10) 36px
+	);
+}
+
+progressbar.vertical trough slider {
+	background-image: linear-gradient(to right,
+		rgba(255, 255, 255, 0) 0%,
+		rgba(0, 0, 0, 0) 49%,
+		rgba(0, 0, 0, 0.10) 50%,
+		rgba(0, 0, 0, 0) 100%);
+	min-width: 14px;
+}
+
+progressbar.vertical text {
+	margin-right: 20px;
+	margin-left: -16px;
+	padding-left: 8px;
+}
+
+levelbar.horizontal trough {
+	background-color: @theme_base_color;
+	min-height: 5px;
+	padding: 1px;
+}
+
+levelbar block.filled {
+	background-color: @levelbar_filled_bg_color;
+	margin: 0 1px;
+}
+
+levelbar block.empty {
+	background-color: @levelbar_filled_empty_color;
+}
+
+scale slider {
+	background-color: @theme_button_bg_color;
+}
+
+scale slider:disabled {
+	background-color: @theme_disabled_bg_color;
+}
+
+scale trough {
+	outline-offset: -2px;
+}
+
+scale trough:disabled {
+	background-color: transparent;
+}
+
+scale highlight {
+	background-color: @medium_gray;
+	margin: 1px;
+}
+
+scale highlight:disabled {
+	background-color: transparent;
+}
+
+scale.horizontal {
+	padding: 6px;
+}
+
+scale.horizontal slider {
+	margin: -4px 0px;
+	min-height: 10px;
+	min-width: 30px;
+}
+
+scale.vertical slider {
+	background-image: linear-gradient(to right,
+		rgba(255, 255, 255, 0) 0%,
+		rgba(0, 0, 0, 0) 49%,
+		rgba(0, 0, 0, 0.10) 50%,
+		rgba(0, 0, 0, 0) 100%);
+	margin: 0px -4px;
+	min-width: 10px;
+	min-height: 30px;
+}
+
+scale marks {
+	color: @theme_border_color;
+}
+
+scale marks.top {
+	margin: -6px 6px 0px 6px;
+}
+
+scale marks.bottom {
+	margin: 0px 6px -6px 6px;
+}
+
+scale.horizontal indicator {
+	min-height: 6px;
+	min-width: 1px;
+}
+
+scale.vertical indicator {
+	min-height: 1px;
+	min-width: 6px;
+}
+
+/* Popovers */
+popover {
+	box-shadow: 3px 3px 3px 0px rgba(0, 0, 0, 0.25);
+}
+
+popover,
+popover.background,
+popover.background stack {
+	background-color: @popover_bg_color;
+	color: @theme_selected_fg_color;
+}
+
+popover.background,
+popover.background.menu {
+	border: 1px solid @theme_border_color_shade;
+}
+
+popover viewport {
+	color: @theme_fg_color;
+}
+
+popover radio {
+	min-width: 10px;
+	min-height: 10px;
+}
+
+popover check,
+popover arrow {
+	min-width: 12px;
+	min-height: 12px;
+}
+
+popover check,
+popover radio,
+popover arrow {
+	margin: 3px;
+}
+
+popover label {
+	padding: 0px 6px;
+}
+
+popover separator.horizontal {
+	margin: 6px 0px;
+}
+
+/* Sidebars */
+stacksidebar list {
+	background-color: @theme_bg_color;
+}
+
+stacksidebar row {
+	background-color: @stacksidebar_row_bg_color;
+	color: @theme_selected_fg_color;
+	padding: 6px;
+}
+
+stacksidebar row:selected,
+stacksidebar row:active {
+	background-color: @theme_base_color;
+	color: @theme_fg_color;
+	outline: none;
+}
+
+stacksidebar row:selected:backdrop label {
+	color: @theme_fg_color;
+}
+
+stacksidebar + stack {
+	background-color: @theme_base_color;
+}
+
+/* Spinner */
+@keyframes spin {
+  to {
+    -gtk-icon-transform: rotate(1turn); } }
+spinner {
+	background: none;
+	opacity: 0;
+	-gtk-icon-source: -gtk-icontheme("process-working-symbolic");
+}
+
+spinner:checked {
+	opacity: 1;
+	animation: spin 1s linear infinite;
+}
+
+spinner:checked:disabled {
+	opacity: 0.5;
+}
+
+/* Switch */
+switch {
+	background-color: mix (@theme_base_color, @theme_fg_color, 0.25);
+	color: @theme_fg_color;
+	padding: 1px;
+	margin: 6px;
+}
+
+switch:checked {
+	background-color: @switch_bg_color_checked;
+	color: @theme_selected_fg_color;
+}
+
+switch slider {
+	background-color: @theme_base_color;
+}
+
+/* Expander */
+expander arrow {
+	-gtk-icon-source: -gtk-icontheme("pan-end-symbolic");
+	min-width: 16px;
+	min-height: 16px;
+}
+
+expander arrow:checked {
+	-gtk-icon-source: -gtk-icontheme("pan-down-symbolic");
+}
+
+/* Calendar */
+calendar {
+	padding: 3px;
+	color: @theme_fg_color;
+}
+
+calendar.header {
+	background-color: mix (@theme_base_color, @theme_fg_color, 0.25);
+	color: @theme_fg_color;
+	font-weight: bold;
+}
+
+calendar.view {
+	background-color: @theme_base_color;
+}
+
+calendar.highlight,
+calendar:selected {
+	background-color: @calendar_bg_color_selected;
+	color: @theme_selected_fg_color;
+}
+
+/* Miscellaneous */
+dialog {
+	background-color: @theme_bg_color;
+	color: @theme_fg_color;
+}
+
+dialog.background {
+	border-left: 1px solid @theme_border_color;
+	border-right: 1px solid @theme_border_color;
+	border-bottom: 1px solid @theme_border_color;
+}
+
+dialog headerbar label {
+	font-family: "DejaVu Sans Condensed", sans-serif;
+	font-stretch: condensed;
+	font-weight: bold;
+}
+
+dialog headerbar button label {
+	font-weight: normal;
+}
+
+dialog fontchooser,
+iconview {
+	background-color: @theme_base_color;
+}
+
+scrolledwindow {
+	box-shadow: inset 1px 1px 1px rgba(0, 0, 0, 0.10);
+}
+
+overlay revealer.top {
+	box-shadow: 3px 3px 3px 0px rgba(0, 0, 0, 0.25);
+	padding-right: 6px;
+	padding-bottom: 6px;
+}
+
+overlay revealer frame {
+	background-color: @popover_bg_color;
+	border: 1px solid @theme_border_color_shade;
+	box-shadow: 3px 3px 3px 0px rgba(0, 0, 0, 0.25);
+	color: @theme_selected_fg_color;
+	padding: 6px;
+}
+
+overlay revealer frame border {
+	border-color: transparent;
+}
+
+overlay revealer button {
+	color: @theme_fg_color;
+}
+
+separator,
+frame border /* Firefox borders */ {
+	border: 1px solid @theme_border_color_highlight;
+}
+
+separator { /* Color needed for Firefox separators */
+	color: @theme_border_color_highlight;
+}
+
+popover separator {
+	border-color: @popover_separator_color;
+}
+
+toolbar separator {
+	margin: 0 6px;
+}
+
+paned separator {
+	border: transparent;
+}
+
+paned.horizontal > separator {
+	background: url("assets/pixel-bumps-vert.png") center center no-repeat;
+	min-width: 6px;
+	padding: 0 6px;
+}
+
+paned.vertical > separator {
+	background: url("assets/pixel-bumps-horiz.png") center center no-repeat;
+	min-height: 6px;
+	padding: 6px 0;
+}
+
+paned scrolledwindow {
+	margin: 6px;
+}
+
+paned scrolledwindow,
+scrolledwindow.frame {
+	border: 1px solid @theme_border_color;
+	border-radius: 3px;
+}
+
+tooltip.background {
+	background-color: @theme_bg_color;
+	color: @theme_fg_color;
+	border: 1px solid @theme_border_color;
+}
+
+rubberband,
+flowbox rubberband,
+treeview.view rubberband,
+.view rubberband,
+.view .rubberband,
+.content-view rubberband,
+.rubberband {
+	border: 1px solid @rubberband_border_color;
+	background-color: @rubberband_bg_color;
+}
+
+/* Fixes for rendering issues in some apps */
+window > box > widget > widget { /* Widgets inside of widgets */
+	background-color: @theme_bg_color;
+}

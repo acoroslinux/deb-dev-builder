@@ -248,7 +248,7 @@ class ConfigLoader:
         allowed = {
             "architectures": {"arch", "dpkg_arch"},
             "boot": {"packages", "bootloader"},
-            "desktops": {"desktop", "display_manager", "session_type", "supported_suites", "packages"},
+            "desktops": {"desktop", "display_manager", "session_type", "supported_suites", "packages", "exclude_packages"},
             "hardware": {
                 "name", "architecture", "bootloader", "output_format", "status", "notes",
                 "packages", "partition_start_mib", "firmware_tree", "boot_artifacts",
@@ -257,7 +257,7 @@ class ConfigLoader:
             "live-users": {"live_user"},
             "services": {"services", "packages"},
             "vm": {"name", "output_format", "firmware", "supported_architectures", "packages"},
-            "software": {"packages", "offline_repo_packages", "supported_suites"},
+            "software": {"packages", "exclude_packages", "offline_repo_packages", "supported_suites"},
             "system": {
                 "distro", "distro_name", "base_distro", "system", "suite", "mirror",
                 "security_mirror", "security_suite", "updates_mirror", "updates_suite",

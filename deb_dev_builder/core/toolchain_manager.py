@@ -16,6 +16,8 @@ import tarfile
 logger = logging.getLogger("toolchain_manager")
 
 _HOST_ARCH = platform.machine().lower()
+_DEVUAN_KEYRING_URL = "https://pkgmaster.devuan.org/devuan/pool/main/d/devuan-keyring/devuan-keyring_2026.01.13_all.deb"
+_DEVUAN_KEYRING_SHA256 = "c53429b645bea3a6edd427d70b7fb49b629a99fc9b9915260026a300540400f2"
 
 class ToolchainManagerError(Exception):
     pass
@@ -45,11 +47,15 @@ class ToolchainManager:
         self.required_tools = required_tools or ["mksquashfs", "xorriso", "grub-mkstandalone", "mcopy", "mmd", "mkfs.vfat"]
         self.toolchain_config = toolchain_config or {}
         self.build_host_dir = self.workdir_base.parent / "build_host"
-        self.cache_dir = self.workdir_base.parent / "cache"
+        # Reusable state lives outside the disposable architecture workdir.
+        # Derive this from the supplied workdir so alternate project roots and
+        # tests remain self-contained.
+        self.cache_dir = self.workdir_base.parents[1] / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.is_mounted = False
         self.use_isolated = False
         self.backend = "mock" if self.mode == "mock" else "isolated-oci"
+        self.workdir_mount = None
 
         from deb_dev_builder.core.path_utils import resolve_from_project
         self.project_root = resolve_from_project(".")
@@ -140,8 +146,11 @@ class ToolchainManager:
         if digest.hexdigest().lower() != expected.lower():
             raise ToolchainManagerError("Toolchain tarball SHA-256 verification failed")
         self.build_host_dir.mkdir(parents=True, exist_ok=True)
-        with tarfile.open(archive, "r:*") as handle:
-            handle.extractall(self.build_host_dir, filter="data")
+        # Debian rootfs archives legitimately contain absolute symlinks such as
+        # /var/run -> /run. Reuse the guarded OCI extractor: it permits those
+        # links while rejecting path traversal and extraction through an
+        # escaping parent directory.
+        self._oci_extract_layer(archive)
         if not self._is_bootstrapped():
             raise ToolchainManagerError("Toolchain tarball does not contain a valid build_host")
         cached_archives = {path.resolve() for path in self._cached_toolchain_archives()}
@@ -152,9 +161,75 @@ class ToolchainManager:
         """Return local build-host caches in preferred order."""
         root = self.cache_dir / "toolchains"
         return [
-            root / f"build-host-{_HOST_ARCH}.tar.xz",
-            root / f"build-host-{_HOST_ARCH}.tar.zst",
+            root / f"build-host-{_HOST_ARCH}-v2.tar.xz",
+            root / f"build-host-{_HOST_ARCH}-v2.tar.zst",
         ]
+
+    @staticmethod
+    def _oci_platform(machine: str) -> tuple[str, Optional[str]]:
+        """Map Linux machine names to OCI platform descriptors."""
+        platforms = {
+            "x86_64": ("amd64", None), "amd64": ("amd64", None),
+            "i386": ("386", None), "i486": ("386", None), "i586": ("386", None), "i686": ("386", None),
+            "aarch64": ("arm64", None), "arm64": ("arm64", None),
+            "armv7l": ("arm", "v7"), "armv6l": ("arm", "v6"),
+            "ppc64le": ("ppc64le", None), "riscv64": ("riscv64", None), "s390x": ("s390x", None),
+        }
+        if machine not in platforms:
+            raise ToolchainManagerError(f"Unsupported host architecture for OCI bootstrap: {machine}")
+        return platforms[machine]
+
+    def install_devuan_keyring(self) -> None:
+        """Install a pinned Devuan archive keyring into the isolated build host."""
+        if self.mode == "mock":
+            return
+        if not self.is_mounted:
+            raise ToolchainManagerError("Devuan keyring installation requires a mounted isolated build host")
+        keyring = self.build_host_dir / "usr" / "share" / "keyrings" / "devuan-archive-keyring.pgp"
+        if keyring.is_file():
+            return
+        cache = self.cache_dir / "keyrings" / "devuan-keyring_2026.01.13_all.deb"
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        if not cache.is_file() or self._sha256(cache) != _DEVUAN_KEYRING_SHA256:
+            bundled = self.project_root / "tools" / "keyrings" / cache.name
+            if bundled.is_file() and self._sha256(bundled) == _DEVUAN_KEYRING_SHA256:
+                shutil.copy2(bundled, cache)
+            else:
+                partial = cache.with_name(f"{cache.name}.partial")
+                partial.unlink(missing_ok=True)
+                try:
+                    urllib.request.urlretrieve(_DEVUAN_KEYRING_URL, partial)
+                except OSError as exc:
+                    partial.unlink(missing_ok=True)
+                    raise ToolchainManagerError(f"Could not download the pinned Devuan keyring: {exc}") from exc
+                if self._sha256(partial) != _DEVUAN_KEYRING_SHA256:
+                    partial.unlink(missing_ok=True)
+                    raise ToolchainManagerError("Devuan keyring SHA-256 verification failed")
+                partial.replace(cache)
+            if self._sha256(cache) != _DEVUAN_KEYRING_SHA256:
+                cache.unlink(missing_ok=True)
+                raise ToolchainManagerError("Devuan keyring SHA-256 verification failed")
+        destination = self.build_host_dir / "tmp" / cache.name
+        shutil.copy2(cache, destination)
+        self.run_in_build_host(["dpkg", "--install", f"/tmp/{cache.name}"])
+        destination.unlink(missing_ok=True)
+        if not keyring.is_file():
+            raise ToolchainManagerError("Devuan keyring package did not install its archive keyring")
+
+    def ensure_devuan_debootstrap_scripts(self, suites: list[str]) -> None:
+        """Provide Devuan suite aliases expected by debootstrap."""
+        if self.mode == "mock":
+            return
+        scripts = self.build_host_dir / "usr" / "share" / "debootstrap" / "scripts"
+        ceres = scripts / "ceres"
+        if not ceres.exists():
+            raise ToolchainManagerError("The isolated build host has no debootstrap Ceres script")
+        for suite in suites:
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", suite):
+                raise ToolchainManagerError(f"Invalid Devuan suite alias: {suite!r}")
+            alias = scripts / suite
+            if not alias.exists() and not alias.is_symlink():
+                alias.symlink_to("ceres")
 
     @staticmethod
     def _sha256(path: Path) -> str:
@@ -165,7 +240,7 @@ class ToolchainManager:
         return digest.hexdigest()
 
     def cache_build_host(self) -> Path:
-        """Store a verified, reusable isolated build host under ``workdir/cache``."""
+        """Store a verified, reusable isolated build host under the project cache."""
         if not self._is_bootstrapped():
             raise ToolchainManagerError("Cannot cache an incomplete build_host")
         archive = self._cached_toolchain_archives()[0]
@@ -174,11 +249,23 @@ class ToolchainManager:
         partial.unlink(missing_ok=True)
         project_mount_root = self.project_mount.relative_to(self.build_host_dir).parts[0]
         excluded_roots = {"proc", "sys", "dev", "run", project_mount_root}
-        with tarfile.open(partial, "w:xz") as handle:
-            for entry in sorted(self.build_host_dir.iterdir(), key=lambda path: path.name):
-                if entry.name in excluded_roots:
-                    continue
-                handle.add(entry, arcname=entry.name, recursive=True)
+        tar_cmd = ["tar", "--create", "--numeric-owner", "--one-file-system", "--directory", str(self.build_host_dir)]
+        tar_cmd.extend(f"--exclude=./{name}" for name in sorted(excluded_roots))
+        tar_cmd.append(".")
+        with partial.open("wb") as output:
+            compressor = subprocess.Popen(
+                ["xz", "--threads=0", "--compress", "--stdout", "--check=crc64"],
+                stdin=subprocess.PIPE,
+                stdout=output,
+            )
+            try:
+                tar_result = subprocess.run(tar_cmd, stdout=compressor.stdin, check=False)
+            finally:
+                if compressor.stdin:
+                    compressor.stdin.close()
+            if tar_result.returncode != 0 or compressor.wait() != 0:
+                partial.unlink(missing_ok=True)
+                raise ToolchainManagerError("Could not create the compressed build-host cache")
         partial.replace(archive)
         checksum = self._sha256(archive)
         archive.with_name(f"{archive.name}.sha256").write_text(
@@ -206,7 +293,13 @@ class ToolchainManager:
     def _oci_extract_layer(self, archive: Path) -> None:
         root = self.build_host_dir.resolve()
         with tarfile.open(archive, "r:*") as handle:
-            for member in handle:
+            # OCI layers frequently store duplicate files as hardlinks whose
+            # target appears later in the archive. Extract ordinary entries
+            # first so Python's tarfile extractor never depends on member
+            # ordering.
+            members = list(handle)
+            ordered = [m for m in members if not m.islnk()] + [m for m in members if m.islnk()]
+            for member in ordered:
                 member_name = member.name
                 while member_name.startswith("./"):
                     member_name = member_name[2:]
@@ -255,8 +348,8 @@ class ToolchainManager:
             f"{registry}/v2/{repository}/manifests/{reference}", token,
             "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json",
         ))
-        host_arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(_HOST_ARCH, _HOST_ARCH)
-        descriptor = next((item for item in index.get("manifests", []) if item.get("platform", {}).get("os") == "linux" and item.get("platform", {}).get("architecture") == host_arch), None)
+        host_arch, host_variant = self._oci_platform(_HOST_ARCH)
+        descriptor = next((item for item in index.get("manifests", []) if item.get("platform", {}).get("os") == "linux" and item.get("platform", {}).get("architecture") == host_arch and (host_variant is None or item.get("platform", {}).get("variant") == host_variant)), None)
         if not descriptor or not re.fullmatch(r"sha256:[0-9a-f]{64}", descriptor.get("digest", "")):
             raise ToolchainManagerError(f"Official Debian OCI image has no valid linux/{host_arch} manifest")
         manifest_digest = descriptor["digest"]
@@ -304,10 +397,13 @@ class ToolchainManager:
             self.mount_virtual_fs()
             packages = [
                 "mmdebstrap", "debootstrap", "squashfs-tools", "zstd", "xorriso", "grub-common", "grub-pc-bin",
-                "grub-efi-amd64-bin", "grub-efi-ia32-bin", "mtools", "dosfstools", "qemu-utils", "parted",
+                "grub-efi-amd64-bin", "grub-efi-ia32-bin", "grub-efi-arm64-bin:arm64", "grub-efi-arm-bin:armhf",
+                "grub-efi-riscv64-bin:riscv64", "grub-ieee1275-bin:ppc64el", "mtools", "dosfstools", "qemu-utils", "qemu-user-static", "parted",
                 "btrfs-progs", "syslinux-utils", "fdisk", "util-linux", "ca-certificates", "xfsprogs", "f2fs-tools",
                 "xz-utils", "gzip", "lz4",
             ]
+            for architecture in ("arm64", "armhf", "riscv64", "ppc64el"):
+                self.run_in_build_host(["dpkg", "--add-architecture", architecture], check=True)
             self.run_in_build_host(["apt-get", "update"], check=True)
             self.run_in_build_host(["apt-get", "install", "-y", *packages], check=True)
         except Exception:
@@ -390,15 +486,22 @@ class ToolchainManager:
         mounts = [
             ("proc", self.build_host_dir / "proc", "proc", None),
             ("sysfs", self.build_host_dir / "sys", "sysfs", None),
-            ("/dev", self.build_host_dir / "dev", None, "--rbind"),
+            ("/dev", self.build_host_dir / "dev", None, "--bind"),
         ]
         for src, target, fstype, opts in mounts:
             target.mkdir(parents=True, exist_ok=True)
-            if opts == "--rbind":
-                result = subprocess.run(["mount", "--rbind", src, str(target)], check=False, stderr=subprocess.PIPE, text=True)
+            if opts in {"--bind", "--rbind"}:
+                result = subprocess.run(["mount", opts, src, str(target)], check=False, stderr=subprocess.PIPE, text=True)
                 if result.returncode != 0:
                     raise ToolchainManagerError(f"Could not bind-mount {src} at {target}: {result.stderr.strip()}")
-                subprocess.run(["mount", "--make-rslave", str(target)], check=False)
+                slave = subprocess.run(
+                    ["mount", "--make-rslave", str(target)],
+                    check=False, stderr=subprocess.PIPE, text=True,
+                )
+                if slave.returncode != 0:
+                    raise ToolchainManagerError(
+                        f"Could not make {target} a private slave mount: {slave.stderr.strip()}"
+                    )
                 continue
             cmd = ["mount", "-t", fstype]
             cmd.extend([src, str(target)])
@@ -411,6 +514,30 @@ class ToolchainManager:
         if result.returncode != 0:
             raise ToolchainManagerError(f"Could not bind project into build host: {result.stderr.strip()}")
 
+        # A plain bind mount does not include nested mounts. When --tmpfs is
+        # used, explicitly bind the architecture workdir into the build host
+        # so tools running in the isolated namespace can see the rootfs.
+        try:
+            relative_workdir = self.workdir_base.relative_to(self.project_root)
+            self.workdir_mount = self.project_mount / relative_workdir
+            self.workdir_mount.mkdir(parents=True, exist_ok=True)
+            result = subprocess.run(
+                ["mount", "--rbind", str(self.workdir_base), str(self.workdir_mount)],
+                check=False, stderr=subprocess.PIPE, text=True,
+            )
+            if result.returncode != 0:
+                raise ToolchainManagerError(f"Could not bind architecture workdir into build host: {result.stderr.strip()}")
+            slave = subprocess.run(
+                ["mount", "--make-rslave", str(self.workdir_mount)],
+                check=False, stderr=subprocess.PIPE, text=True,
+            )
+            if slave.returncode != 0:
+                raise ToolchainManagerError(
+                    f"Could not make {self.workdir_mount} a private slave mount: {slave.stderr.strip()}"
+                )
+        except ValueError as exc:
+            raise ToolchainManagerError("Architecture workdir must be inside the project root") from exc
+
     def umount_virtual_fs(self):
         if self.mode == "mock":
             logger.info("[MOCK TOOLCHAIN] Unmounting virtual filesystems from build_host.")
@@ -420,15 +547,24 @@ class ToolchainManager:
         if not self.build_host_dir.exists():
             return
 
+        from deb_dev_builder.core.path_utils import unmount_all_under
+
         for path in [
+            self.workdir_mount,
             self.project_mount,
             self.build_host_dir / "dev",
             self.build_host_dir / "sys",
             self.build_host_dir / "proc",
         ]:
-            if path.exists():
+            if path is not None and path.exists():
+                # Both the build-host /dev and the project/workdir binds can
+                # contain nested mounts.  Always detach descendants first;
+                # a lazy unmount of only the parent leaves mounts behind and
+                # can make the next sudo invocation lose its host PTY.
+                unmount_all_under(path)
                 subprocess.run(["umount", "-l", str(path)], check=False, stderr=subprocess.DEVNULL)
 
+        self.workdir_mount = None
         self.is_mounted = False
 
     def run_tool(self, tool_binary: str, args: List[str], check: bool = True) -> subprocess.CompletedProcess:

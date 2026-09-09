@@ -11,6 +11,22 @@
     "rsync",
     "p7zip-full",
     "curl",
-    "wget"
+    "wget",
+    "grub-pc",
+    "grub2-common",
+    "efibootmgr",
+    "libefiboot1",
+    "libefivar1",
+    "grub-efi-amd64-bin",
+    "grub-efi-ia32-bin",
+    "shim-signed",
+    "os-prober",
+    "mokutil",
+    "parted",
+    "dosfstools",
+    "btrfs-progs",
+    "xfsprogs",
+    "nvidia-driver",
+    "firmware-linux-nonfree"
   ]
 }

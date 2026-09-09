@@ -55,6 +55,26 @@ class TestISOEngine:
         assert engine.should_use_grub_efi() is True
         assert engine.should_use_grub_bios() is False
 
+    def test_kernel_and_initramfs_are_selected_as_a_versioned_pair(self, tmp_path):
+        workdir = tmp_path / "amd64"
+        root = workdir / "root"
+        (root / "boot").mkdir(parents=True)
+        for version in ("6.1.0-1-amd64", "6.12.0-1-amd64"):
+            (root / "boot" / f"vmlinuz-{version}").write_bytes(b"kernel")
+            (root / "boot" / f"initrd.img-{version}").write_bytes(b"initrd")
+        # An unmatched initramfs must never be selected accidentally.
+        (root / "boot" / "initrd.img-9.99.0-unmatched").write_bytes(b"bad")
+        engine = ISOEngine(workdir, root, "pair", {"architecture": "amd64"}, "mock", ToolchainManager(workdir, mode="mock"))
+        assert engine._find_kernel_and_initramfs() == ("vmlinuz-6.12.0-1-amd64", "initrd.img-6.12.0-1-amd64")
+
+    def test_boot_templates_do_not_hide_kernel_errors(self, tmp_path):
+        workdir = tmp_path / "amd64"
+        engine = ISOEngine(workdir, workdir / "root", "debug", {"architecture": "amd64"}, "mock", ToolchainManager(workdir, mode="mock"))
+        engine.build_iso()
+        grub = (engine.iso_staging / "boot" / "grub" / "grub.cfg").read_text()
+        assert "quiet splash" not in grub
+        assert "xci586" not in grub
+
     def test_mock_netinstall_stages_real_installer_layout_without_live_rootfs(self, tmp_path):
         workdir = tmp_path / "work"
         config = {

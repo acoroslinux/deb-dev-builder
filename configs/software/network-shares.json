@@ -1,3 +1,7 @@
 {
-  "packages": ["samba", "smbclient", "cifs-utils", "nfs-common", "avahi-daemon"]
+  "packages": [
+    "samba", "smbclient", "libsmbclient", "cifs-utils", "nfs-common",
+    "gvfs", "gvfs-backends", "gvfs-fuse", "avahi-daemon", "avahi-utils",
+    "libnss-mdns"
+  ]
 }

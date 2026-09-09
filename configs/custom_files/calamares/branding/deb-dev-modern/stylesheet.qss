@@ -1,0 +1,47 @@
+/* Calamares Stylesheet - Deb-Dev Modern Theme */
+
+/* Sidebar Area styling */
+#sidebarApp {
+    background-color: #1A1C1E;
+    min-width: 200px;
+}
+
+#sidebarApp QLabel {
+    color: #8C92AC;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 8px 16px;
+    background-color: transparent;
+}
+
+#sidebarApp QLabel[selected="true"] {
+    color: #47A7F5;
+    font-weight: bold;
+    background-color: #24292F;
+}
+
+#logoApp {
+    background-color: #1A1C1E;
+    padding: 20px;
+}
+
+/* Navigation buttons bar at the bottom */
+#navigationWidget {
+    background-color: #1A1C1E;
+    border-top: 1px solid #2A2D35;
+}
+
+/* Custom styled progress bar with modern gradient */
+QProgressBar {
+    border: 1px solid #A0A5B5;
+    background-color: #E1E4EA;
+    border-radius: 4px;
+    text-align: center;
+    color: #121314;
+    font-weight: bold;
+}
+
+QProgressBar::chunk {
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #47A7F5, stop:1 #9E00FF);
+    border-radius: 3px;
+}

@@ -10,6 +10,11 @@ def config_root():
     return resolve_from_project("configs")
 
 class TestConfigLoader:
+    def test_desktop_base_is_requested_without_global_exclusion(self, config_root):
+        loader = ConfigLoader(config_root)
+        assert "desktop-base" in loader.load_profile("software", "desktop-utils")["packages"]
+        assert "desktop-base" not in loader.load_profile("software", "base").get("exclude_packages", [])
+
     def test_load_global_config(self, config_root):
         loader = ConfigLoader(config_root)
         config = loader.assemble_build_config(
@@ -22,11 +27,11 @@ class TestConfigLoader:
     def test_package_profiles_exist(self, config_root):
         required = [
             "base", "audio", "bluetooth", "browsers", "chat", "cloud-tools",
-            "desktop-apps", "dev-tools", "development", "filesystems", "gaming",
+            "desktop-apps", "desktop-utils", "dev-tools", "development", "filesystems", "gaming",
             "graphics", "ide", "multimedia", "multimedia-editing", "network-shares",
             "network-tools", "networking", "office", "printing", "productivity",
-            "security", "system-utils", "virtualization", "wayland", "xorg",
-            "firmware"
+            "security", "system-utils", "update-tools", "virtualization", "wayland", "xorg",
+            "firmware", "multimedia-extra", "pipewire", "pulseaudio"
         ]
         for name in required:
             path = config_root / "software" / f"{name}.json"

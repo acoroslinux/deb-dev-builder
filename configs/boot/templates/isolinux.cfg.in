@@ -24,22 +24,22 @@ MENU COLOR sel          * #ffffffff #FF5255FF *
 LABEL live
   MENU LABEL @@BOOT_TITLE@@ @@DESKTOP@@ (Standard Live)
   KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
 
 LABEL liveram
   MENU LABEL @@BOOT_TITLE@@ @@DESKTOP@@ (Copy to RAM)
   KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ toram locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ toram locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
 
 LABEL livepersist
   MENU LABEL @@BOOT_TITLE@@ @@DESKTOP@@ (with Persistence)
   KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ persistence locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ persistence locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
 
 LABEL livenogfx
   MENU LABEL @@BOOT_TITLE@@ @@DESKTOP@@ (Safe Graphics - nomodeset)
   KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ nomodeset xci586 noapic acpi=off locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
+  APPEND initrd=/live/initrd.img @@KERNEL_PARAMS@@ nomodeset locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
 
 LABEL c
   MENU LABEL Boot first HD found by BIOS

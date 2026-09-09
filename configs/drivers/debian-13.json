@@ -1,0 +1,15 @@
+{
+  "distribution": "debian",
+  "release": "debian-13",
+  "channel": "stable",
+  "families": {
+    "current": {
+      "packages": ["nvidia-driver", "nvidia-driver-full", "nvidia-detect"],
+      "architectures": ["amd64", "arm64"]
+    },
+    "tesla-535": {
+      "packages": ["nvidia-tesla-535-driver", "nvidia-detect"],
+      "architectures": ["amd64"]
+    }
+  }
+}

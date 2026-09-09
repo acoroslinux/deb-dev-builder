@@ -1,0 +1,7 @@
+{
+  "packages": [
+    "package-update-indicator",
+    "gnome-packagekit",
+    "apt-config-auto-update"
+  ]
+}

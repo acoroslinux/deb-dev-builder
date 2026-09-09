@@ -5,9 +5,14 @@
     "xserver-xorg-video-all",
     "xserver-xorg-video-vmware",
     "xserver-xorg-input-all",
+    "console-setup",
+    "xkb-data",
+    "libxkbcommon-x11-0",
     "x11-xserver-utils",
     "x11-utils",
     "dbus-x11",
-    "desktop-base"
+    "xterm",
+    "plymouth",
+    "plymouth-themes"
   ]
 }

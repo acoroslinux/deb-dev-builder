@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -107,6 +108,31 @@ class BuildOrchestrator:
         self.rootfs_cleanup = rootfs_cleanup
         self.hardware_profile = hardware_profile
         self.vm_profile = vm_profile
+
+        # A desktop live image should be useful immediately after boot. Keep
+        # these defaults scoped to that use case so minimal/server/iot builds
+        # remain small and predictable.
+        if self.variant == "live" and self.desktop:
+            audio_profiles = {"audio", "pipewire", "pulseaudio"}
+            for profile in (
+                "filesystems", "networking", "network-shares", "printing",
+                "security", "system-utils", "multimedia",
+            ):
+                if profile not in self.package_profiles:
+                    self.package_profiles.append(profile)
+            if not audio_profiles.intersection(self.package_profiles):
+                self.package_profiles.append("pipewire")
+
+        # Graphical builds should provide a reliable native package manager;
+        # non-graphical/server images do not need the GTK application.
+        if self.desktop and "desktop-utils" not in self.package_profiles:
+            self.package_profiles.append("desktop-utils")
+
+        # GTK desktops benefit from a tray update indicator and PackageKit
+        # integration. KDE provides its own Discover workflow, so avoid
+        # pulling duplicate update frontends there.
+        if self.desktop and str(self.desktop).lower() != "kde" and "update-tools" not in self.package_profiles:
+            self.package_profiles.append("update-tools")
 
         # --- SMART BOOTLOADER DEFAULTS ---
         if not self.bootloader:
@@ -420,6 +446,9 @@ class BuildOrchestrator:
             # The isolated toolchain must be mounted before bootstrap so that
             # mmdebstrap/debootstrap never executes from the host.
             toolchain.mount_virtual_fs()
+            if self.config.get("base_distro") == "devuan":
+                toolchain.install_devuan_keyring()
+                toolchain.ensure_devuan_debootstrap_scripts([self.config.get("suite", "ceres")])
             installer_only = self.output_format == "netboot" or self.di_mode == "netinstall"
             if installer_only:
                 hooks.run("pre-installer")
@@ -465,13 +494,50 @@ class BuildOrchestrator:
             hooks.run_chroot("post-packages", chroot)
 
             # Prepare offline package repository if requested
-            offline_pkgs = list(self.config.get("offline_repo_packages", []))
+            # The catalog profile is opt-in: merely defining package names
+            # must not create an offline repository unless requested.
+            offline_pkgs = list(self.config.get("offline_repo_packages", [])) if self.with_offline_repo else []
             if self.offline_repo_packages:
                 for p in self.offline_repo_packages:
                     if p not in offline_pkgs:
                         offline_pkgs.append(p)
+            # Add only stable NVIDIA driver families declared for this exact
+            # distribution release and architecture.  Availability is checked
+            # against the target APT indexes so Devuan does not inherit Debian
+            # packages that it does not ship.
+            driver_catalog = resolve_from_project(f"configs/drivers/{self.distro}.json")
+            if driver_catalog.is_file():
+                try:
+                    catalog = json.loads(driver_catalog.read_text(encoding="utf-8"))
+                    for family in catalog.get("families", {}).values():
+                        supported_arches = family.get("architectures", [])
+                        if self.arch not in supported_arches and self.config.get("dpkg_arch") not in supported_arches:
+                            continue
+                        for package in family.get("packages", []):
+                            available = True
+                            if self.mode != "mock":
+                                probe = chroot.run_in_chroot(
+                                    ["apt-cache", "show", package],
+                                    check=False, capture_output=True, text=True,
+                                )
+                                available = probe.returncode == 0 and bool(probe.stdout.strip())
+                            if available and package not in offline_pkgs:
+                                offline_pkgs.append(package)
+                except (OSError, json.JSONDecodeError, TypeError, AttributeError) as exc:
+                    logger.warning("Could not load stable driver catalog %s: %s", driver_catalog, exc)
+            # Do not duplicate packages already installed in the live root.
+            # Keep an optional architecture/version suffix intact while
+            # comparing the package name itself.
+            installed_names = {
+                package.split("=", 1)[0].split(":", 1)[0]
+                for package in self.config.get("software", [])
+            }
+            offline_pkgs = [
+                package for package in offline_pkgs
+                if package.split("=", 1)[0].split(":", 1)[0] not in installed_names
+            ]
 
-            if (self.with_offline_repo or offline_pkgs) and self.output_format == "iso":
+            if (self.with_offline_repo or self.offline_repo_packages) and self.output_format == "iso":
                 offline_repo_dir = self.workdir / "offline_repo"
                 apt.download_offline_packages(offline_pkgs, offline_repo_dir)
                 self.config["offline_repo_dir"] = str(offline_repo_dir)
@@ -517,6 +583,18 @@ class BuildOrchestrator:
             hooks.run("pre-unmount")
             chroot.umount_virtual_fs()
             unmount_all_under(self.target_root)
+            # Some kernels retain descendants of recursive /dev binds after
+            # individual lazy unmounts.  Perform one explicit tree detach at
+            # the exact target root before declaring the chroot dirty.
+            if os.geteuid() == 0 and mountpoints_under(self.target_root):
+                for virtual_root in ("dev", "sys", "proc"):
+                    candidate = self.target_root / virtual_root
+                    if candidate.exists():
+                        subprocess.run(
+                            ["umount", "--recursive", "--lazy", str(candidate)],
+                            check=False, stderr=subprocess.DEVNULL,
+                        )
+                unmount_all_under(self.target_root)
             if os.geteuid() == 0 and mountpoints_under(self.target_root):
                 raise BuildOrchestratorError(f"Target root still has mounted host paths: {mountpoints_under(self.target_root)}")
             hooks.run("post-unmount")
@@ -579,12 +657,24 @@ class BuildOrchestrator:
 
             if self.mode != "mock" and os.geteuid() == 0:
                 unmount_all_under(resolve_from_project("workdir"))
+                if getattr(self, "_tmpfs_mounted", False):
+                    subprocess.run(["umount", "-l", str(self.workdir)], check=False, stderr=subprocess.DEVNULL)
+                    self._tmpfs_mounted = False
 
             if self.clean and self.mode != "mock" and self.workdir.exists():
                 try:
                     safe_remove_tree(self.workdir, allowed_root=resolve_from_project("workdir"))
                 except Exception:
                     logger.exception("Could not safely remove workdir %s", self.workdir)
+
+            # The build host is a disposable runtime root; its verified
+            # archive remains in the project-level cache for reuse.
+            build_host_dir = getattr(toolchain, "build_host_dir", None)
+            if self.clean and self.mode != "mock" and build_host_dir and Path(build_host_dir).exists():
+                try:
+                    safe_remove_tree(build_host_dir, allowed_root=resolve_from_project("workdir"))
+                except Exception:
+                    logger.exception("Could not safely remove build_host %s", build_host_dir)
 
             output_dir = resolve_from_project("output")
             self._fix_output_permissions(output_dir)

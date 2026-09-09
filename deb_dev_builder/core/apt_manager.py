@@ -22,8 +22,12 @@ class APTManager:
 
     def resolve_cache_dir(self) -> Path:
         arch = getattr(self.chroot, "arch", "amd64")
+        distro = str(self.config.get("base_distro") or self.config.get("distro") or "debian").lower()
+        suite = str(self.config.get("suite") or "stable").lower()
         configured_cache = self.config.get("system", {}).get("apt_cache")
-        workspace_cache = self.target_root.parent.parent / "cache" / arch / "apt"
+        # target_root is <project>/workdir/<arch>/chroot; cache survives
+        # disposable workdir cleanup at the project root.
+        workspace_cache = self.target_root.parents[2] / "cache" / distro / suite / arch / "apt"
         cache_path_str = configured_cache or str(workspace_cache)
         candidate = Path(cache_path_str)
         if not candidate.is_absolute():
@@ -35,7 +39,7 @@ class APTManager:
             return candidate
         except Exception:
             import tempfile
-            fallback = Path(tempfile.gettempdir()) / "deb-dev-builder-cache" / "apt" / arch
+            fallback = Path(tempfile.gettempdir()) / "deb-dev-builder-cache" / "apt" / distro / suite / arch
             fallback.mkdir(parents=True, exist_ok=True)
             return fallback
 
@@ -44,6 +48,7 @@ class APTManager:
         checks = [
             self.target_root / "etc" / "os-release",
             self.target_root / "usr" / "bin" / "dpkg",
+            self.target_root / "usr" / "bin" / "apt-get",
             self.target_root / "etc" / "apt",
         ]
         if not all(path.exists() for path in checks):
@@ -54,6 +59,16 @@ class APTManager:
         except (OSError, json.JSONDecodeError):
             return False
         return metadata.get("suite") == suite and metadata.get("arch") == arch
+
+    def _base_files_is_installed(self) -> bool:
+        """Return whether dpkg records the required base-files package."""
+        status = self.target_root / "var" / "lib" / "dpkg" / "status"
+        if not status.is_file():
+            return False
+        return any(
+            "Package: base-files\n" in block and "Status: install ok installed" in block
+            for block in status.read_text(errors="replace").split("\n\n")
+        )
 
     def _write_bootstrap_marker(self, suite: str, arch: str) -> None:
         marker = self.target_root / ".deb-dev-builder-bootstrap.json"
@@ -162,7 +177,7 @@ class APTManager:
             return
 
         configured_suite = self.config.get("suite", suite)
-        if reuse_existing and self._is_bootstrapped_rootfs(configured_suite, arch):
+        if reuse_existing and self._is_bootstrapped_rootfs(configured_suite, arch) and self._base_files_is_installed():
             logger.info("♻️ Reusing existing rootfs because --no-clean was requested.")
             return
         if reuse_existing and (self.target_root / "etc" / "os-release").exists():
@@ -179,7 +194,7 @@ class APTManager:
             logger.info(f"⚡ Fast-bootstrapping rootfs from local seed tarball: {seed_cache}")
             self.target_root.mkdir(parents=True, exist_ok=True)
             res = subprocess.run(["tar", "xzpf", str(seed_cache), "-C", str(self.target_root), "--numeric-owner"])
-            if res.returncode == 0 and (self.target_root / "etc" / "os-release").exists():
+            if res.returncode == 0 and self._is_bootstrapped_rootfs(configured_suite, arch) and self._base_files_is_installed():
                 self._write_bootstrap_marker(configured_suite, arch)
                 logger.info("⚡ Successfully bootstrapped rootfs from local seed tarball in under 3 seconds!")
                 self.sync_cache_to_target()
@@ -198,26 +213,22 @@ class APTManager:
         is_devuan = str(self.config.get("distro", "")).startswith("devuan-")
         devuan_keyring = next((path for path in (
             Path("/usr/share/keyrings/devuan-archive-keyring.gpg"),
+            Path("/usr/share/keyrings/devuan-archive-keyring.pgp"),
             Path("/usr/share/keyrings/devuan-keyring.gpg"),
         ) if path.is_file()), None)
-
-        dev_dir = self.target_root / "dev"
-        dev_dir.mkdir(parents=True, exist_ok=True)
-        (self.target_root / "proc").mkdir(parents=True, exist_ok=True)
-        (self.target_root / "sys").mkdir(parents=True, exist_ok=True)
-
-        fd_dir = dev_dir / "fd"
-        if fd_dir.is_symlink():
-            fd_dir.unlink()
-        fd_dir.mkdir(parents=True, exist_ok=True)
+        isolated_mmdebstrap = self.toolchain is not None and getattr(self.toolchain, "use_isolated", False) and self.toolchain._tool_in_build_host("mmdebstrap")
+        if isolated_mmdebstrap:
+            devuan_keyring = Path("/usr/share/keyrings/devuan-archive-keyring.pgp") if is_devuan else None
 
         # Prefer mmdebstrap if available, fallback to debootstrap
-        if shutil.which("mmdebstrap"):
+        if isolated_mmdebstrap or shutil.which("mmdebstrap"):
             cmd = [
                 "mmdebstrap",
-                f"--arch={arch}",
+                f"--architectures={arch}",
                 f"--components={components}",
                 "--variant=essential",
+                "--include=apt",
+                "--aptopt=APT::Install-Recommends=true",
                 suite,
                 str(self.target_root),
                 mirror,
@@ -227,10 +238,7 @@ class APTManager:
                 if devuan_keyring:
                     cmd.insert(1, f"--keyring={devuan_keyring}")
                 else:
-                    cmd[1:1] = [
-                        "--aptopt=Acquire::AllowInsecureRepositories=true",
-                        "--aptopt=APT::Get::AllowUnauthenticated=true",
-                    ]
+                    raise APTManagerError("Devuan bootstrap requires a verified devuan-keyring")
         elif shutil.which("debootstrap"):
             cmd = [
                 "debootstrap",
@@ -245,10 +253,11 @@ class APTManager:
                 if devuan_keyring:
                     cmd.insert(1, f"--keyring={devuan_keyring}")
                 else:
-                    cmd.insert(1, "--no-check-gpg")
+                    raise APTManagerError("Devuan bootstrap requires a verified devuan-keyring")
         else:
             raise APTManagerError("Neither mmdebstrap nor debootstrap is installed on the host")
 
+        self._last_bootstrap_command = list(cmd)
         if self.toolchain is not None and getattr(self.toolchain, "use_isolated", False):
             # The target path is exposed through the project bind mount in the
             # isolated build_host; do not execute bootstrap helpers on host.
@@ -265,6 +274,19 @@ class APTManager:
                 except Exception:
                     pass
             raise APTManagerError(f"Bootstrap failed with exit code: {res.returncode}{err_detail}")
+        if not self._base_files_is_installed():
+            raise APTManagerError("Bootstrap completed without an installed base-files package")
+
+        # mmdebstrap requires an empty target directory. Prepare these mount
+        # points only after the base rootfs has been created.
+        dev_dir = self.target_root / "dev"
+        dev_dir.mkdir(parents=True, exist_ok=True)
+        (self.target_root / "proc").mkdir(parents=True, exist_ok=True)
+        (self.target_root / "sys").mkdir(parents=True, exist_ok=True)
+        fd_dir = dev_dir / "fd"
+        if fd_dir.is_symlink():
+            fd_dir.unlink()
+        fd_dir.mkdir(parents=True, exist_ok=True)
 
         host_resolv = Path("/etc/resolv.conf")
         target_resolv = self.target_root / "etc" / "resolv.conf"
@@ -348,7 +370,18 @@ class APTManager:
             apt_conf_dir = self.chroot.target_root / "etc" / "apt" / "apt.conf.d"
             apt_conf_dir.mkdir(parents=True, exist_ok=True)
             optimize_conf = apt_conf_dir / "99optimize"
-            optimize_conf.write_text('Acquire::http::Pipeline-Depth "10";\nAcquire::Languages "none";\n')
+            optimize_conf.write_text(
+                'Acquire::http::Pipeline-Depth "10";\n'
+                'Acquire::Languages "none";\n'
+                'APT::Install-Recommends "true";\n'
+            )
+            excluded = [p for p in self.config.get("exclude_packages", []) if isinstance(p, str) and p]
+            preferences = self.chroot.target_root / "etc" / "apt" / "preferences.d" / "99deb-dev-builder-excludes"
+            if excluded:
+                preferences.parent.mkdir(parents=True, exist_ok=True)
+                preferences.write_text("".join(f"Package: {package}\nPin: version *\nPin-Priority: -1\n\n" for package in excluded))
+            else:
+                preferences.unlink(missing_ok=True)
 
         if not packages or self.chroot.mode == "mock":
             return
@@ -384,6 +417,10 @@ class APTManager:
         real_pkgs = [p for p in packages if p]
         if real_pkgs:
             logger.info(f"📦 Downloading {len(real_pkgs)} offline packages into {dest_dir}...")
+            # Seed the target APT archive and repository directly from the
+            # persistent project cache before contacting the network.  APT
+            # will reuse matching .debs and only fetch missing versions.
+            self.sync_cache_to_target()
             cmd = ["apt-get", "install", "-y", "--download-only"] + real_pkgs
             result = self.chroot.run_in_chroot(cmd, check=False, env={"DEBIAN_FRONTEND": "noninteractive"})
             if result.returncode != 0:
@@ -399,12 +436,14 @@ class APTManager:
                             shutil.copy2(deb, dst)
                     except Exception:
                         pass
+            self.sync_cache_from_target()
 
         self.create_repository_metadata(dest_dir)
         return dest_dir
 
     def create_repository_metadata(self, repo_dir: Path):
         import gzip
+        from email.utils import formatdate
         repo_dir = Path(repo_dir)
         repo_dir.mkdir(parents=True, exist_ok=True)
         if self.chroot.mode == "mock":
@@ -429,11 +468,20 @@ class APTManager:
             (repo_dir / "Packages.gz").touch()
 
         release_file = repo_dir / "Release"
+        indexed_files = [path for path in (repo_dir / "Packages", repo_dir / "Packages.gz") if path.is_file()]
+        md5_lines = [f" {hashlib.md5(path.read_bytes()).hexdigest()} {path.stat().st_size:>12} {path.name}" for path in indexed_files]
+        sha256_lines = [f" {self._sha256(path)} {path.stat().st_size:>12} {path.name}" for path in indexed_files]
         release_content = (
-            "Archive: stable\n"
+            f"Date: {formatdate(usegmt=True)}\n"
+            "Suite: stable\n"
+            "Codename: offline\n"
             "Component: main\n"
             "Origin: Offline-ISO\n"
             "Label: Offline ISO Repository\n"
+            "Architectures: amd64 arm64 armhf i386 ppc64el riscv64\n"
+            "Components: main\n"
             f"Architecture: {self.config.get('dpkg_arch', 'amd64')}\n"
+            "MD5Sum:\n" + "\n".join(md5_lines) + "\n"
+            "SHA256:\n" + "\n".join(sha256_lines) + "\n"
         )
         release_file.write_text(release_content)

@@ -13,7 +13,7 @@ menuentry '@@BOOT_TITLE@@ @@DESKTOP@@ (Standard Live)' --class debian --class gn
     if [ -z "$root" ]; then
         search --no-floppy --set=root --file /live/vmlinuz
     fi
-    linux /live/vmlinuz @@KERNEL_PARAMS@@ locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+    linux /live/vmlinuz @@KERNEL_PARAMS@@ locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
     initrd /live/initrd.img
 }
 
@@ -22,7 +22,7 @@ menuentry '@@BOOT_TITLE@@ @@DESKTOP@@ (Copy to RAM)' --class debian --class gnu-
     if [ -z "$root" ]; then
         search --no-floppy --set=root --file /live/vmlinuz
     fi
-    linux /live/vmlinuz @@KERNEL_PARAMS@@ toram locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+    linux /live/vmlinuz @@KERNEL_PARAMS@@ toram locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
     initrd /live/initrd.img
 }
 
@@ -31,7 +31,7 @@ menuentry '@@BOOT_TITLE@@ @@DESKTOP@@ (with Persistence)' --class debian --class
     if [ -z "$root" ]; then
         search --no-floppy --set=root --file /live/vmlinuz
     fi
-    linux /live/vmlinuz @@KERNEL_PARAMS@@ persistence locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@ quiet splash
+    linux /live/vmlinuz @@KERNEL_PARAMS@@ persistence locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
     initrd /live/initrd.img
 }
 
@@ -40,7 +40,7 @@ menuentry '@@BOOT_TITLE@@ @@DESKTOP@@ (Safe Graphics - nomodeset)' --class debia
     if [ -z "$root" ]; then
         search --no-floppy --set=root --file /live/vmlinuz
     fi
-    linux /live/vmlinuz @@KERNEL_PARAMS@@ nomodeset xci586 noapic acpi=off locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
+    linux /live/vmlinuz @@KERNEL_PARAMS@@ nomodeset locales=@@LOCALE@@ keyboard-layouts=@@KEYMAP@@
     initrd /live/initrd.img
 }
 

@@ -1,0 +1,16 @@
+[Desktop Entry]
+Name=Yaru-grey
+Type=X-GNOME-Metatheme
+Comment=Ubuntu Yaru-grey theme
+Encoding=UTF-8
+
+[X-GNOME-Metatheme]
+GtkTheme=Yaru-grey
+MetacityTheme=Yaru
+IconTheme=Yaru
+CursorTheme=Yaru
+CursorSize=24
+X-Yaru-Dark=false
+X-Yaru-Accent-Name=grey
+X-Yaru-Accent-Color=#878787
+/home/initu/Downloads/yaru/build/gtk/src/Yaru-grey-grey-accent-color-info.scss:26 DEBUG: Contrast optimized accent is #989898

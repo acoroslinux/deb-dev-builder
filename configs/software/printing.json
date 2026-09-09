@@ -1,3 +1,3 @@
 {
-  "packages": ["cups", "cups-filters", "system-config-printer"]
+  "packages": ["cups", "cups-filters", "cups-browsed", "system-config-printer"]
 }

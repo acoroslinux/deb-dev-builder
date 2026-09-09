@@ -2,7 +2,7 @@
   "system": {
     "hostname": "debian-modern",
     "timezone": "UTC",
-    "locale": "pt_PT.UTF-8",
+    "locale": "en_US.UTF-8",
     "iso_label": "DEBIAN-MODERN"
   },
   "boot": {
@@ -15,7 +15,7 @@
   },
   "cleanup": {
     "enabled": true,
-    "apt_lists": true,
+    "apt_lists": false,
     "apt_archives": true,
     "logs": true,
     "temporary": true,

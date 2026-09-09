@@ -1,0 +1,25 @@
+{
+  "distribution": "debian",
+  "release": "debian-12",
+  "channel": "stable",
+  "families": {
+    "current": {
+      "packages": ["nvidia-driver", "nvidia-driver-full", "nvidia-detect"],
+      "architectures": ["amd64", "arm64"]
+    },
+    "tesla": {
+      "packages": ["nvidia-tesla-driver", "nvidia-detect"],
+      "architectures": ["amd64", "arm64", "ppc64el"]
+    },
+    "legacy": {
+      "packages": [
+        "nvidia-tesla-470-driver",
+        "nvidia-tesla-460-driver",
+        "nvidia-tesla-450-driver",
+        "nvidia-tesla-418-driver",
+        "nvidia-legacy-390xx-driver"
+      ],
+      "architectures": ["amd64", "arm64", "i386", "armhf", "ppc64el"]
+    }
+  }
+}

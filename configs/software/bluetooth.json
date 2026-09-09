@@ -1,3 +1,6 @@
 {
-  "packages": ["bluez", "blueman"]
+  "packages": [
+    "bluez",
+    "blueman"
+  ]
 }

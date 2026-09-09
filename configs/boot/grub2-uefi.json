@@ -1,5 +1,5 @@
 {
-  "packages": ["grub-efi-amd64-bin", "grub-efi-ia32-bin"],
+  "packages": ["grub2-common", "grub-efi-amd64-bin", "grub-efi-ia32-bin", "efibootmgr", "libefiboot1", "libefivar1"],
   "bootloader": {
     "type": "grub2-uefi"
   }

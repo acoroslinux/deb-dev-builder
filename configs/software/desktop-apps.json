@@ -1,3 +1,9 @@
 {
-  "packages": ["gparted", "file-roller", "evince", "eog", "gnome-calculator"]
+  "packages": [
+    "gparted",
+    "file-roller",
+    "evince",
+    "eog",
+    "gnome-calculator"
+  ]
 }

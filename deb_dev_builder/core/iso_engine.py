@@ -236,18 +236,37 @@ class ISOEngine:
 
     def _find_kernel_and_initramfs(self) -> Tuple[str, str]:
         boot_dir = self.target_root / "boot"
-        kernel = None
-        initramfs = None
+        if not boot_dir.exists():
+            return "vmlinuz", "initrd.img"
 
-        if boot_dir.exists():
-            vmlinuz_files = sorted([f.name for f in boot_dir.glob("vmlinuz-*") if not f.name.endswith(".old") and not f.name.endswith(".bak")])
-            initrd_files = sorted([f.name for f in boot_dir.glob("initrd.img-*") if not f.name.endswith(".old") and not f.name.endswith(".bak")])
-            if vmlinuz_files:
-                kernel = vmlinuz_files[-1]
-            if initrd_files:
-                initramfs = initrd_files[-1]
+        kernels = {f.name.removeprefix("vmlinuz-"): f.name for f in boot_dir.glob("vmlinuz-*")
+                   if f.is_file() and not f.name.endswith((".old", ".bak"))}
+        initrds = {f.name.removeprefix("initrd.img-"): f.name for f in boot_dir.glob("initrd.img-*")
+                   if f.is_file() and not f.name.endswith((".old", ".bak"))}
+        common = set(kernels) & set(initrds)
+        if not common:
+            if self.mode == "mock":
+                return "vmlinuz", "initrd.img"
+            raise ISOEngineError("No kernel/initramfs pair with a matching version was found")
 
-        return kernel or "vmlinuz", initramfs or "initrd.img"
+        def newer(left: str, right: str) -> bool:
+            # Debian's dpkg comparator handles epochs, revisions and tildes.
+            try:
+                result = subprocess.run(
+                    ["dpkg", "--compare-versions", left, "gt", right],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+                return result.returncode == 0
+            except OSError:
+                # Portable fallback for environments without dpkg.
+                return [int(part) if part.isdigit() else part for part in re.split(r"([0-9]+)", left)] > [int(part) if part.isdigit() else part for part in re.split(r"([0-9]+)", right)]
+
+        selected = next(iter(common))
+        for version in common:
+            if newer(version, selected):
+                selected = version
+        return kernels[selected], initrds[selected]
 
     def _create_squashfs(self, source_dir: Path, output_path: Path):
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -559,7 +578,16 @@ class ISOEngine:
             self.toolchain.run_tool("mmd", ["-i", str(efiboot_img), "::/EFI"], check=False)
             self.toolchain.run_tool("mmd", ["-i", str(efiboot_img), "::/EFI/BOOT"], check=False)
             for f in efi_files:
-                self.toolchain.run_tool("mcopy", ["-i", str(efiboot_img), str(f), f"::/EFI/BOOT/{f.name}"], check=False)
+                result = self.toolchain.run_tool("mcopy", ["-i", str(efiboot_img), str(f), f"::/EFI/BOOT/{f.name}"], check=False)
+                if result.returncode != 0:
+                    raise ISOEngineError(f"Could not copy EFI file into ESP: {f.name}")
+
+            # The primary architecture executable is mandatory. IA32 is an
+            # optional compatibility loader on amd64 media.
+            required_efi = {primary_filename}
+            missing = [filename for filename in required_efi if not any(f.name == filename for f in efi_files)]
+            if missing:
+                raise ISOEngineError(f"Missing EFI boot executable(s): {', '.join(sorted(missing))}")
 
     def _copy_syslinux_binaries(self):
         syslinux_paths = [
@@ -621,7 +649,7 @@ class ISOEngine:
                     f"LABEL failsafe\n"
                     f"  MENU LABEL {iso_label} Live (^Failsafe Mode)\n"
                     f"  KERNEL /live/vmlinuz\n"
-                    f"  APPEND initrd=/live/initrd.img {kernel_params} nomodeset xci586 noapic acpi=off\n"
+                    f"  APPEND initrd=/live/initrd.img {kernel_params} nomodeset\n"
                 )
             if self.config.get("di_mode") == "netinstall":
                 syslinux_cfg = "UI vesamenu.c32\nPROMPT 0\nTIMEOUT 50\n"
@@ -735,10 +763,23 @@ class ISOEngine:
                 "    initrd /live/initrd.img\n"
                 "}\n\n"
                 f"menuentry \"{iso_label} Live (Failsafe Mode)\" --hotkey=f {{\n"
-                f"    linux /live/vmlinuz {kernel_params} nomodeset xci586 noapic acpi=off\n"
+                f"    linux /live/vmlinuz {kernel_params} nomodeset\n"
                 "    initrd /live/initrd.img\n"
                 "}\n"
             )
+        # Chroot overlays do not automatically become files in the El Torito
+        # filesystem. Stage and activate the bundled graphical GRUB theme.
+        grub_theme_src = resolve_from_project("configs/custom_files/boot/grub/themes/deb-dev-modern")
+        if grub_theme_src.is_dir():
+            grub_theme_dst = self.iso_staging / "boot/grub/themes/deb-dev-modern"
+            shutil.copytree(grub_theme_src, grub_theme_dst, dirs_exist_ok=True)
+            grub_cfg_text = (
+                "insmod gfxterm\ninsmod png\nset gfxmode=auto\n"
+                "terminal_output gfxterm\n"
+                "set theme=/boot/grub/themes/deb-dev-modern/theme.txt\n\n"
+                + grub_cfg_text
+            )
+
         if installer_only:
             grub_cfg_text = "source /boot/grub/config.cfg\n"
 

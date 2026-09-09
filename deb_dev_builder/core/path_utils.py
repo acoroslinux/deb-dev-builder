@@ -90,6 +90,17 @@ def unmount_all_under(target_dir: Path) -> None:
     for mp in unique_mounts:
         subprocess.run(["umount", "-l", "-f", mp], capture_output=True)
 
+    # Recursive bind mounts may not disappear when each entry is detached
+    # individually (notably devpts/shm/mqueue below a rbind /dev).  Ask
+    # util-linux to walk the tree as a final, narrowly scoped fallback.
+    remaining = mountpoints_under(target_resolved)
+    if remaining:
+        subprocess.run(["umount", "--recursive", "--lazy", str(target_resolved)], capture_output=True)
+        # A few kernels expose descendants again after the recursive detach;
+        # retry the deepest entries once more before returning to callers.
+        for mp in sorted(mountpoints_under(target_resolved), key=len, reverse=True):
+            subprocess.run(["umount", "-l", "-f", mp], capture_output=True)
+
 def mountpoints_under(target_dir: str | Path) -> list[str]:
     """Return active mountpoints at or below a narrow target directory."""
     import os

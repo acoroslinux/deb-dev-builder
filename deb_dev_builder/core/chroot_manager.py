@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Optional, List, Union
 import logging
 
+from deb_dev_builder.core.path_utils import unmount_all_under
+
 logger = logging.getLogger("chroot_manager")
 
 class ChrootManagerError(Exception):
@@ -33,15 +35,24 @@ class ChrootManager:
         mounts = [
             ("proc", self.target_root / "proc", "proc", None),
             ("sysfs", self.target_root / "sys", "sysfs", None),
-            ("/dev", self.target_root / "dev", None, "--rbind"),
+            # A plain bind intentionally avoids importing the host's nested
+            # devpts/shm/mqueue mounts into the target namespace.
+            ("/dev", self.target_root / "dev", None, "--bind"),
         ]
         for src, target, fstype, opts in mounts:
             target.mkdir(parents=True, exist_ok=True)
-            if opts == "--rbind":
-                cmd = ["mount", "--rbind", src, str(target)]
+            if opts in {"--bind", "--rbind"}:
+                cmd = ["mount", opts, src, str(target)]
                 result = subprocess.run(cmd, check=False, stderr=subprocess.PIPE, text=True)
                 if result.returncode == 0:
-                    subprocess.run(["mount", "--make-rslave", str(target)], check=False)
+                    slave = subprocess.run(
+                        ["mount", "--make-rslave", str(target)],
+                        check=False, stderr=subprocess.PIPE, text=True,
+                    )
+                    if slave.returncode != 0:
+                        raise ChrootManagerError(
+                            f"Could not make {target} a private slave mount: {slave.stderr.strip()}"
+                        )
                 else:
                     raise ChrootManagerError(f"Could not bind-mount {src} at {target}: {result.stderr.strip()}")
                 continue
@@ -83,6 +94,11 @@ class ChrootManager:
             self.target_root / "proc",
         ]:
             if path.exists():
+                # /dev is mounted recursively and contains its own mounts
+                # (/dev/pts, /dev/shm, /dev/mqueue, ...).  Remove children
+                # first so validation and subsequent cleanup never see stale
+                # host mounts below the target root.
+                unmount_all_under(path)
                 subprocess.run(["umount", "-l", str(path)], check=False, stderr=subprocess.DEVNULL)
         self.is_mounted = False
 

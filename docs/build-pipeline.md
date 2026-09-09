@@ -2,7 +2,7 @@
 
 1. Load and validate all selected JSON profiles.
 2. Select native or isolated tools for the requested artifact format.
-3. Run `preflight`/`post-toolchain` hooks and bootstrap with `mmdebstrap`, falling back to `debootstrap`.
+3. Run `preflight`/`post-toolchain` hooks and bootstrap with `mmdebstrap`, falling back to `debootstrap`. APT package recommendations remain enabled by default; only language downloads are disabled for efficiency.
 4. Run bootstrap hooks, mount `/proc`, `/sys`, and recursive `/dev`, and run mount hooks.
 5. Run APT hooks around source configuration and metadata update.
 6. Run package hooks around installation; matching `hooks/chroot/<phase>.d` hooks run inside the target.

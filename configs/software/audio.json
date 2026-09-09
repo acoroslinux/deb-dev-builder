@@ -3,7 +3,9 @@
     "pipewire",
     "pipewire-audio",
     "pipewire-pulse",
+    "pipewire-alsa",
     "wireplumber",
+    "libspa-0.2-bluetooth",
     "pavucontrol",
     "alsa-utils"
   ]
