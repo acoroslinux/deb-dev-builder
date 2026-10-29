@@ -124,7 +124,13 @@ class TestISOEngine:
         (root / "proc").mkdir()
         (root / "etc" / "hostname").write_text("debian\n")
         (root / "proc" / "mounted-data").write_text("exclude me")
-        toolchain = ToolchainManager(workdir, mode="real", required_tools=["tar", "xz"])
+        # Exercise real tar packaging with an explicit local test runner.
+        # Production ToolchainManager must never fall back to host tools.
+        import subprocess
+        class LocalTarRunner:
+            def run_tool(self, command, args, check=True):
+                return subprocess.run([command, *args], check=check)
+        toolchain = LocalTarRunner()
         engine = ISOEngine(workdir, root, str(tmp_path / "rootfs"), {"architecture": "amd64"}, "real", toolchain)
         result = engine.build_tarball()
         with tarfile.open(result, "r:xz") as archive:

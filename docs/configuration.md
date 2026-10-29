@@ -21,6 +21,7 @@ A selected live-user profile replaces the default group membership, so the
 | `configs/desktops` | Desktop and display manager packages | `xfce` |
 | `configs/software` | Optional package groups | `development` |
 | `configs/services` | Services to enable or disable | `network` |
+| `configs/repos` | Optional user-supplied APT repository profiles | `company` |
 | `configs/boot` | Bootloader packages and settings | `grub2-hybrid` |
 | `configs/hardware` | Device architecture/format defaults | `rpi4` |
 | `configs/vm` | VM format, architecture support and guest packages | `qemu` |
@@ -52,8 +53,41 @@ python cli.py amd64 --distro debian-13 --vm-profile qemu --validate
 ```
 ## Toolchain selection
 
-The global configuration accepts `toolchain.backend` values `auto`, `native`,
-`isolated-bootstrap` and `isolated-tarball`. In automatic mode native tools are
-used only on Debian Trixie; other hosts use the isolated backend. A tarball
-backend requires `tarball_url` and `tarball_sha256` (or the equivalent
-`DEB_DEV_BUILDER_TOOLCHAIN_*` environment variables).
+The global configuration accepts `toolchain.backend` values `auto`,
+`isolated-oci` and `isolated-tarball`. Real builds use an isolated build host;
+native execution is disabled. `auto` and `isolated-oci` reuse a verified cached
+tarball first, then bootstrap from the official Debian OCI image if none exists.
+`isolated-tarball` requires a verified local, cached or downloaded tarball.
+See [toolchain configuration](toolchain.md) for paths and checksums.
+
+## Additional repositories
+
+Create `configs/repos/company.json` and select it with `--repo-profile company`.
+This optional directory is not needed for the built-in distro repositories.
+Profiles accept `repos` or `extra_repos`, containing APT source strings or
+objects such as:
+
+```json
+{
+  "repos": [{
+    "url": "https://packages.example.org/debian",
+    "suite": "trixie",
+    "components": ["main"],
+    "architectures": ["amd64"],
+    "signed_by": "/usr/share/keyrings/company.gpg",
+    "key_source": "configs/keys/company.gpg"
+  }]
+}
+```
+
+The local `key_source` file is copied into the target before APT metadata is
+updated. Relative key sources resolve from the project root. It requires a
+`signed_by` destination below `/usr/share/keyrings` or `/etc/apt/keyrings`.
+The builder does not disable authentication for third-party repositories.
+Repository profiles accept repeated and comma-separated names, like package
+and service profiles.
+
+`systemd-boot` is available as a bootloader profile for disk output. ISO output
+uses GRUB2 or syslinux. Disk images use a matching kernel/initramfs pair,
+architecture-specific removable UEFI paths and an `/etc/fstab` for the ROOTFS
+and EFI labels. Live-only kernel options are removed from disk boot entries.

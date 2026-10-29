@@ -256,6 +256,7 @@ class ConfigLoader:
             },
             "live-users": {"live_user"},
             "services": {"services", "packages"},
+            "repos": {"repos", "extra_repos", "packages"},
             "vm": {"name", "output_format", "firmware", "supported_architectures", "packages"},
             "software": {"packages", "exclude_packages", "offline_repo_packages", "supported_suites"},
             "system": {

@@ -18,6 +18,21 @@ Requested compression (`zstd`, `xz`, `gzip`, or `lz4`) happens after native
 validation. Checksums describe the final artifact. The OCI output is an OCI
 image-layout archive, not a plain rootfs tar.
 
+Disk output generates removable UEFI files without probing the host root
+filesystem. On x86, `grub2-bios` and `grub2-hybrid` also create a GPT BIOS boot
+partition and install GRUB against the image's root partition using a temporary
+loop device. The mount and loop device are released on success or failure.
+BIOS installation requires loop-device access and mount privileges.
+The `syslinux` profile supports x86 disks with ext4, using extlinux and GPT MBR
+boot code with the root partition marked for legacy boot.
+
+OCI layers are hashed from disk in chunks, keeping memory use independent of
+rootfs size. Runtime directories such as `/tmp` are preserved empty with their
+permissions; their build-time contents are excluded. ARM hard-float images
+declare the OCI `arm/v7` platform.
+
+Use `--no-manifest` to disable checksum and package-manifest generation.
+
 VM profiles select both the native format and guest integration packages:
 
 | Profile | Format | Guest integration |

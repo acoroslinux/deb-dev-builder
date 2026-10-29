@@ -194,6 +194,12 @@ def main():
         default=None,
         help="Live-user profile from configs/live-users/ (for example: admin or guest).",
     )
+    parser.add_argument(
+        "--repo-profile", action="append", default=[],
+        help="Repository profile from configs/repos/ (repeatable or comma-separated).",
+    )
+    parser.add_argument("--no-manifest", action="store_true", help="Disable checksum and package manifest generation.")
+    parser.add_argument("--no-rootfs-cleanup", action="store_true", help="Preserve transient files in the target rootfs.")
 
     parser.add_argument(
         "-f",
@@ -352,10 +358,14 @@ def main():
     )
 
     args = parser.parse_args()
+    def option_given(*names):
+        return any(value == name or value.startswith(name + "=")
+                   or (name.startswith("-") and not name.startswith("--") and value.startswith(name) and len(value) > len(name))
+                   for value in sys.argv[1:] for name in names)
 
     if args.di_mode == "netboot":
         args.with_debian_installer = True
-        if "--format" not in sys.argv and "-f" not in sys.argv:
+        if not option_given("--format", "-f"):
             args.format = "netboot"
     elif args.di_mode == "netinstall":
         args.with_debian_installer = True
@@ -368,7 +378,7 @@ def main():
             vm_config = ConfigLoader(resolve_from_project("configs")).load_json(vm_file)
         except ConfigLoaderError as exc:
             parser.error(str(exc))
-        if "--format" not in sys.argv and "-f" not in sys.argv:
+        if not option_given("--format", "-f"):
             args.format = vm_config["output_format"]
 
 
@@ -395,11 +405,11 @@ def main():
                     args.architecture = dev_cfg["architecture"]
             
             # Explicitly update format
-            if "output_format" in dev_cfg and "--format" not in sys.argv and "-f" not in sys.argv:
+            if "output_format" in dev_cfg and not option_given("--format", "-f"):
                 args.format = dev_cfg["output_format"]
                 
             # Explicitly update bootloader
-            if "bootloader" in dev_cfg and "--bootloader" not in sys.argv and "-b" not in sys.argv:
+            if "bootloader" in dev_cfg and not option_given("--bootloader", "-b"):
                 # To prevent config_loader from crashing when we pass a dict, we can dump it to a temporary file
                 # OR we just set args.bootloader = dev_cfg["bootloader"] and fix config_loader.py
                 args.bootloader = dev_cfg["bootloader"]
@@ -427,6 +437,7 @@ def main():
             ("boot",         "bootloaders  ", "bootloader"),
             ("software",     "packages     ", None),
             ("services",     "services     ", "services"),
+            ("repos",        "repos        ", None),
             ("live-users",   "live-users   ", "live_user"),
             ("hardware",     "hardware     ", "architecture"),
             ("vm",           "vm           ", "output_format"),
@@ -460,6 +471,7 @@ def main():
             variant=args.variant,
             package_profiles=parsed_package_profiles,
             service_profiles=parsed_service_profiles,
+            repo_profiles=_parse_list_arg(args.repo_profile),
             live_profile=args.live_profile,
             output_format=args.format,
             with_calamares=args.with_calamares,
@@ -481,6 +493,8 @@ def main():
             use_tmpfs=getattr(args, "tmpfs", False),
             hooks_dir=args.hooks_dir,
             hooks_enabled=not args.no_hooks,
+            rootfs_cleanup=not args.no_rootfs_cleanup,
+            generate_manifest=not args.no_manifest,
             hardware_profile=args.device,
             vm_profile=args.vm_profile,
         )

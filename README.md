@@ -12,14 +12,14 @@
 - 🐧 **Debian & Devuan Native**: Uses `mmdebstrap` / `debootstrap` for ultra-fast rootfs bootstrap
 - ⚙️ **Init System Independence**: Support for `systemd`, `sysvinit`, `openrc`, and `runit`
 - 🏛️ **Multi-Architecture**: `amd64`, `i386`, `aarch64`, `armhf`, `riscv64`
-- 🔒 **Secure Boot Aware**: Debian x86 builds include signed shim/GRUB assets when the selected repositories provide them
+- 🔒 **Secure Boot Aware**: Debian x86 ISOs include signed shim/GRUB assets when the selected repositories provide them
 - 📦 **Flathub & ZRAM Ready**: Automatic systemd-zram-generator and Flathub flatpak integration
 - 🎨 **Desktop Environments**: GNOME, KDE, XFCE, MATE, Cinnamon, LXQt, i3, Sway, Hyprland
 - 💿 **Calamares Installer**: Integrated GUI installer launcher
 - 💾 **Multiple Artifacts**: ISO, raw IMG, QCOW2, VDI, VMDK, rootfs tarball, and OCI image-layout archive
 - 🌐 **Install Media**: Live+d-i, installer-only netinstall ISO, PXE netboot archive, and Calamares live installer
 - 🖥️ **VM Profiles**: QEMU/KVM, VirtualBox, VMware, and Hyper-V formats with guest integration packages
-- 🪝 **Build Hooks**: Ordered hooks around bootstrap, packages, customization, artifact creation, errors, and cleanup
+- 🪝 **Build Hooks**: Ordered `pre-chroot`, `chroot`, and `post-chroot` hooks, with internal cleanup on failure
 - 🔍 **Mock Mode**: Full build simulation without root privileges
 
 ---

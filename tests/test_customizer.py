@@ -64,8 +64,9 @@ def test_offline_repository_uses_live_medium_path_only(tmp_path):
     assert "file:/run/live/medium/repo/" in sources
     assert "file:/media/cdrom/repo/" not in sources
 
-def test_offline_repository_is_opt_in(tmp_path):
+def test_offline_repository_is_opt_in(tmp_path, monkeypatch):
     root = tmp_path / "chroot"
+    monkeypatch.setattr(ChrootManager, "run_in_chroot", lambda self, command, **kwargs: subprocess.CompletedProcess(command, 0))
     customizer = SystemCustomizer(
         ChrootManager(root, mode="real"),
         {"offline_repo_packages": ["nala"], "with_offline_repo": False},

@@ -4,4 +4,7 @@ Before packaging, the builder unmounts every mountpoint below the target root an
 
 The policy is controlled by the `cleanup` object in `configs/global_build.json`. Documentation, locales and package files are deliberately not removed automatically because doing so can break installed applications or accessibility.
 
-The `pre-cleanup` and `post-cleanup` hook phases run after unmounting and before `pre-artifact`.
+The `chroot` hook phase runs before unmounting and cleanup. `post-chroot` runs
+after artifact creation. Resource cleanup also runs on failure, independently
+of user hooks. Use `--no-rootfs-cleanup` to skip transient rootfs file removal;
+resource unmounting still takes place. See [hooks](hooks.md).

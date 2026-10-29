@@ -138,7 +138,10 @@ class APTManager:
             sources_lines.append(f"deb {bp_mirror} {bp_suite} {comp_str}")
 
         # Extra / third-party repositories
-        extra_repos = self.config.get("extra_repos", [])
+        extra_repos = list(self.config.get("extra_repos", []))
+        for repo in self.config.get("repos", []):
+            if repo not in extra_repos:
+                extra_repos.append(repo)
         if extra_repos:
             sources_lines.append("")
             sources_lines.append("# Extra repositories")
@@ -151,7 +154,30 @@ class APTManager:
                         raise APTManagerError("Extra repository entry is missing its URL")
                     repo_suite = repo.get("suite", suite)
                     repo_comps = " ".join(repo.get("components", components))
-                    sources_lines.append(f"deb {repo_url} {repo_suite} {repo_comps}")
+                    options = []
+                    if repo.get("signed_by"):
+                        options.append(f"signed-by={repo['signed_by']}")
+                    if repo.get("key_source"):
+                        from deb_dev_builder.core.path_utils import resolve_from_project
+                        key_path = Path(repo.get("signed_by", ""))
+                        if not key_path.is_absolute() or ".." in key_path.parts or not any(
+                            key_path.is_relative_to(directory)
+                            for directory in (Path("/usr/share/keyrings"), Path("/etc/apt/keyrings"))
+                        ):
+                            raise APTManagerError("Repository key_source requires signed_by below /usr/share/keyrings or /etc/apt/keyrings")
+                        source = resolve_from_project(repo["key_source"])
+                        destination = self.target_root / key_path.relative_to("/")
+                        if not source.is_file():
+                            raise APTManagerError(f"Repository signing key not found: {source}")
+                        if not destination.resolve().is_relative_to(self.target_root.resolve()):
+                            raise APTManagerError("Repository signing key destination escapes the target rootfs")
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(source, destination)
+                        destination.chmod(0o644)
+                    if repo.get("architectures"):
+                        options.append(f"arch={','.join(repo['architectures'])}")
+                    prefix = f"[{' '.join(options)}] " if options else ""
+                    sources_lines.append(f"deb {prefix}{repo_url} {repo_suite} {repo_comps}")
 
         sources_content = "\n".join(sources_lines) + "\n"
         with open(sources_dir / "sources.list", "w") as f:
@@ -193,7 +219,8 @@ class APTManager:
         if use_seed and not recreate_seed and self._seed_is_verified(seed_cache):
             logger.info(f"⚡ Fast-bootstrapping rootfs from local seed tarball: {seed_cache}")
             self.target_root.mkdir(parents=True, exist_ok=True)
-            res = subprocess.run(["tar", "xzpf", str(seed_cache), "-C", str(self.target_root), "--numeric-owner"])
+            runner = self.toolchain.run_in_build_host if self.toolchain else subprocess.run
+            res = runner(["tar", "xzpf", str(seed_cache), "-C", str(self.target_root), "--numeric-owner"], check=False)
             if res.returncode == 0 and self._is_bootstrapped_rootfs(configured_suite, arch) and self._base_files_is_installed():
                 self._write_bootstrap_marker(configured_suite, arch)
                 logger.info("⚡ Successfully bootstrapped rootfs from local seed tarball in under 3 seconds!")
@@ -216,12 +243,13 @@ class APTManager:
             Path("/usr/share/keyrings/devuan-archive-keyring.pgp"),
             Path("/usr/share/keyrings/devuan-keyring.gpg"),
         ) if path.is_file()), None)
-        isolated_mmdebstrap = self.toolchain is not None and getattr(self.toolchain, "use_isolated", False) and self.toolchain._tool_in_build_host("mmdebstrap")
-        if isolated_mmdebstrap:
+        isolated = self.toolchain is not None
+        available = self.toolchain._tool_in_build_host if isolated else shutil.which
+        if isolated:
             devuan_keyring = Path("/usr/share/keyrings/devuan-archive-keyring.pgp") if is_devuan else None
 
         # Prefer mmdebstrap if available, fallback to debootstrap
-        if isolated_mmdebstrap or shutil.which("mmdebstrap"):
+        if available("mmdebstrap"):
             cmd = [
                 "mmdebstrap",
                 f"--architectures={arch}",
@@ -239,7 +267,7 @@ class APTManager:
                     cmd.insert(1, f"--keyring={devuan_keyring}")
                 else:
                     raise APTManagerError("Devuan bootstrap requires a verified devuan-keyring")
-        elif shutil.which("debootstrap"):
+        elif available("debootstrap"):
             cmd = [
                 "debootstrap",
                 f"--arch={arch}",
@@ -255,15 +283,30 @@ class APTManager:
                 else:
                     raise APTManagerError("Devuan bootstrap requires a verified devuan-keyring")
         else:
-            raise APTManagerError("Neither mmdebstrap nor debootstrap is installed on the host")
+            raise APTManagerError("Neither mmdebstrap nor debootstrap is available in the build environment")
 
         self._last_bootstrap_command = list(cmd)
-        if self.toolchain is not None and getattr(self.toolchain, "use_isolated", False):
+        if self.toolchain is not None:
             # The target path is exposed through the project bind mount in the
             # isolated build_host; do not execute bootstrap helpers on host.
             res = self.toolchain.run_in_build_host(cmd, check=False)
         else:
             res = subprocess.run(cmd)
+        if res.returncode != 0 and cmd[0] == "mmdebstrap" and available("debootstrap"):
+            logger.warning("mmdebstrap failed; retrying with debootstrap in a clean target")
+            from deb_dev_builder.core.path_utils import safe_remove_tree, unmount_all_under, mountpoints_under
+            unmount_all_under(self.target_root)
+            if mountpoints_under(self.target_root):
+                raise APTManagerError("Cannot retry bootstrap while target mounts remain active")
+            safe_remove_tree(self.target_root, allowed_root=self.target_root.parent)
+            self.target_root.mkdir(parents=True, exist_ok=True)
+            cmd = ["debootstrap", f"--arch={arch}", f"--components={components}"]
+            if is_devuan:
+                cmd += ["--include=devuan-keyring", f"--keyring={devuan_keyring}"]
+            cmd += [suite, str(self.target_root), mirror]
+            self._last_bootstrap_command = list(cmd)
+            runner = self.toolchain.run_in_build_host if self.toolchain else subprocess.run
+            res = runner(cmd, check=False)
         if res.returncode != 0:
             log_file = self.target_root / "debootstrap" / "debootstrap.log"
             err_detail = ""
@@ -299,13 +342,17 @@ class APTManager:
         self.configure_sources_list()
         self._write_bootstrap_marker(suite, arch)
 
+        if not use_seed:
+            return
+
         # Save seed tarball for future instant builds (excluding virtual kernel filesystems)
         try:
             seed_cache.parent.mkdir(parents=True, exist_ok=True)
             logger.info(f"⚡ Fast-caching rootfs seed tarball to {seed_cache}...")
             partial_seed = seed_cache.with_name(f"{seed_cache.name}.partial")
             partial_seed.unlink(missing_ok=True)
-            result = subprocess.run([
+            runner = self.toolchain.run_in_build_host if self.toolchain else subprocess.run
+            result = runner([
                 "tar", "czpf", str(partial_seed),
                 "--exclude=./proc/*", "--exclude=./sys/*", "--exclude=./dev/*", "--exclude=./tmp/*", "--exclude=./run/*",
                 "-C", str(self.target_root), "."

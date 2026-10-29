@@ -48,17 +48,20 @@ class ContainerEngine:
                 with tarfile.open(layer_tmp, "w", format=tarfile.PAX_FORMAT) as layer:
                     for child in sorted(self.target_root.iterdir(), key=lambda p: p.name):
                         if child.name in excluded_roots:
+                            if child.is_dir() and not child.is_symlink():
+                                layer.add(child, arcname=child.name, recursive=False)
                             continue
                         layer.add(child, arcname=child.name, recursive=True, filter=self._layer_filter)
-                layer_digest = self._store_blob(layer_tmp.read_bytes(), blobs)
+                layer_digest = self._store_file_blob(layer_tmp, blobs)
                 layer_size = (blobs / layer_digest).stat().st_size
-                layer_tmp.unlink()
 
                 architecture = self.config.get("dpkg_arch", self.config.get("architecture", "amd64"))
-                oci_arch = {"amd64": "amd64", "arm64": "arm64", "aarch64": "arm64", "i386": "386", "armhf": "arm"}.get(architecture, architecture)
+                oci_arch = {"x86_64": "amd64", "amd64": "amd64", "arm64": "arm64", "aarch64": "arm64", "i386": "386", "i686": "386", "armhf": "arm"}.get(architecture, architecture)
+                platform = {"architecture": oci_arch, "os": "linux"}
+                if architecture == "armhf":
+                    platform["variant"] = "v7"
                 image_config = {
-                    "architecture": oci_arch,
-                    "os": "linux",
+                    **platform,
                     "rootfs": {"type": "layers", "diff_ids": [f"sha256:{layer_digest}"]},
                     "config": {"Env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"], "Cmd": ["/bin/sh"]},
                 }
@@ -80,6 +83,7 @@ class ContainerEngine:
                         "mediaType": "application/vnd.oci.image.manifest.v1+json",
                         "digest": f"sha256:{manifest_digest}",
                         "size": len(manifest_bytes),
+                        "platform": platform,
                         "annotations": {"org.opencontainers.image.ref.name": "latest"},
                     }],
                 }
@@ -91,6 +95,16 @@ class ContainerEngine:
             raise ContainerEngineError(f"Failed to create OCI archive: {exc}") from exc
 
         return out_path
+
+    @staticmethod
+    def _store_file_blob(source: Path, blobs: Path) -> str:
+        digest = hashlib.sha256()
+        with source.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        name = digest.hexdigest()
+        source.replace(blobs / name)
+        return name
 
     @staticmethod
     def _store_blob(content: bytes, blobs: Path) -> str:

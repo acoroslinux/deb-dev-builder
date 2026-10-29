@@ -399,7 +399,7 @@ class ToolchainManager:
                 "mmdebstrap", "debootstrap", "squashfs-tools", "zstd", "xorriso", "grub-common", "grub-pc-bin",
                 "grub-efi-amd64-bin", "grub-efi-ia32-bin", "grub-efi-arm64-bin:arm64", "grub-efi-arm-bin:armhf",
                 "grub-efi-riscv64-bin:riscv64", "grub-ieee1275-bin:ppc64el", "mtools", "dosfstools", "qemu-utils", "qemu-user-static", "parted",
-                "btrfs-progs", "syslinux-utils", "fdisk", "util-linux", "ca-certificates", "xfsprogs", "f2fs-tools",
+                "btrfs-progs", "syslinux-utils", "syslinux-common", "extlinux", "fdisk", "util-linux", "ca-certificates", "xfsprogs", "f2fs-tools",
                 "xz-utils", "gzip", "lz4",
             ]
             for architecture in ("arm64", "armhf", "riscv64", "ppc64el"):
@@ -573,12 +573,7 @@ class ToolchainManager:
             logger.info(f"[MOCK TOOL EXEC] {cmd_str}")
             return subprocess.CompletedProcess(args=[tool_binary] + args, returncode=0, stdout="", stderr="")
 
-        if self.is_mounted and self._tool_in_build_host(tool_binary):
-            cmd = ["chroot", str(self.build_host_dir), tool_binary] + args
-        else:
-            cmd = [tool_binary] + args
-
-        return subprocess.run(cmd, check=check)
+        return self.run_in_build_host([tool_binary] + args, check=check)
 
     def run_in_build_host(self, command: Union[str, List[str]], check: bool = True) -> subprocess.CompletedProcess:
         if self.mode == "mock":
@@ -586,12 +581,11 @@ class ToolchainManager:
             logger.info(f"[MOCK BUILD_HOST EXEC] {cmd_str}")
             return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
 
-        use_chroot = self.is_mounted and self._is_base_rootfs()
+        if not self.is_mounted or not self._is_base_rootfs():
+            raise ToolchainManagerError("Build tools require a mounted isolated build host")
         if isinstance(command, str):
-            cmd = (["chroot", str(self.build_host_dir), "/bin/sh", "-c", command]
-                   if use_chroot else ["/bin/sh", "-c", command])
+            cmd = ["chroot", str(self.build_host_dir), "/bin/sh", "-c", command]
         else:
-            cmd = (["chroot", str(self.build_host_dir)] + command
-                   if use_chroot else list(command))
+            cmd = ["chroot", str(self.build_host_dir)] + list(command)
 
         return subprocess.run(cmd, check=check)

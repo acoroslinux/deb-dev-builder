@@ -1,6 +1,7 @@
 import os
 import re
 import shutil
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Dict, Any
@@ -35,8 +36,12 @@ class SystemCustomizer:
         if live_password is not None and (not isinstance(live_password, str) or "\n" in live_password or "\r" in live_password):
             raise ValueError("The live user password must be a single-line string")
 
-        groups = self.config.get("live_groups") or cfg_groups or ["sudo", "audio", "video", "plugdev", "netdev", "users"]
-        groups_str = ",".join(groups)
+        if "live_groups" in self.config:
+            groups = self.config["live_groups"]
+        elif isinstance(live_user_cfg, dict) and "groups" in live_user_cfg:
+            groups = cfg_groups
+        else:
+            groups = ["sudo", "audio", "video", "plugdev", "netdev", "users"]
 
         try:
             for group in groups:
@@ -45,9 +50,10 @@ class SystemCustomizer:
                     self.chroot.run_in_chroot(["groupadd", "-f", str(group)], check=False)
 
             self.chroot.run_in_chroot(["groupadd", "-f", "nopasswdlogin"], check=False)
-            create_user = self.chroot.run_in_chroot(["useradd", "-m", "-s", "/bin/bash", "-G", f"{groups_str},nopasswdlogin", str(live_user)], check=False)
+            login_groups = ",".join([*groups, "nopasswdlogin"])
+            create_user = self.chroot.run_in_chroot(["useradd", "-m", "-s", "/bin/bash", "-G", login_groups, str(live_user)], check=False)
             if create_user.returncode != 0:
-                self.chroot.run_in_chroot(["usermod", "-aG", "nopasswdlogin", str(live_user)], check=False)
+                self.chroot.run_in_chroot(["usermod", "-G", login_groups, str(live_user)], check=True)
 
             # Accounts are locked by default. Autologin is configured through PAM,
             # while an interactive password is only set when a profile explicitly
@@ -66,9 +72,22 @@ class SystemCustomizer:
             raise
 
         sudoers_file = self.target_root / "etc" / "sudoers.d" / "live_user_nopasswd"
-        sudoers_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(sudoers_file, "w") as f:
-            f.write(f"{live_user} ALL=(ALL) NOPASSWD: ALL\n")
+        if "sudo" in groups:
+            sudoers_file.parent.mkdir(parents=True, exist_ok=True)
+            sudoers_file.write_text(f"{live_user} ALL=(ALL) NOPASSWD: ALL\n")
+            sudoers_file.chmod(0o440)
+        else:
+            sudoers_file.unlink(missing_ok=True)
+
+        # live-config must reuse the account prepared here rather than create
+        # its default user or grant fresh sudo permissions during first boot.
+        live_config = self.target_root / "etc/live/config.conf.d/10-deb-dev-user.conf"
+        live_config.parent.mkdir(parents=True, exist_ok=True)
+        live_config.write_text(
+            f"LIVE_USERNAME={shlex.quote(live_user)}\n"
+            f"LIVE_USER_DEFAULT_GROUPS={shlex.quote(','.join(groups))}\n"
+            "LIVE_CONFIG_NOCOMPONENTS=user-setup,sudo\n"
+        )
 
     def configure_system_defaults(self):
         if self.chroot.mode == "mock":
@@ -147,21 +166,21 @@ class SystemCustomizer:
                 services_to_enable.append(display_service)
 
         for svc in services_to_enable:
+            service_name = self._service_name(str(svc), init_system)
             if init_system == "systemd":
                 command = ["systemctl", "enable", str(svc)]
             elif init_system == "openrc":
-                command = ["rc-update", "add", str(svc), "default"]
+                command = ["rc-update", "add", service_name, "default"]
             elif init_system == "sysvinit":
-                service_name = "network-manager" if svc == "NetworkManager" else str(svc)
                 command = ["update-rc.d", service_name, "defaults"]
             elif init_system == "s6":
                 command = ["s6-rc-bundle-update", "add", "default", str(svc)]
             elif init_system == "runit":
-                source = self.target_root / "etc" / "sv" / str(svc)
-                destination = self.target_root / "etc" / "service" / str(svc)
-                if source.exists() and not destination.exists():
+                source = self.target_root / "etc" / "sv" / service_name
+                destination = self.target_root / "etc" / "service" / service_name
+                if source.is_dir() and not destination.is_symlink():
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                    destination.symlink_to(Path("..") / "sv" / str(svc))
+                    destination.symlink_to(Path("..") / "sv" / service_name)
                 continue
             else:
                 logger.warning("Unknown init system %s; cannot enable %s", init_system, svc)
@@ -171,12 +190,18 @@ class SystemCustomizer:
                 logger.warning("Could not enable service %s with %s", svc, init_system)
 
         for svc in services_to_disable:
+            service_name = self._service_name(str(svc), init_system)
             if init_system == "systemd":
                 command = ["systemctl", "disable", str(svc)]
             elif init_system == "openrc":
-                command = ["rc-update", "del", str(svc), "default"]
+                command = ["rc-update", "del", service_name, "default"]
             elif init_system == "sysvinit":
-                command = ["update-rc.d", str(svc), "disable"]
+                command = ["update-rc.d", service_name, "disable"]
+            elif init_system == "runit":
+                destination = self.target_root / "etc/service" / service_name
+                if destination.is_symlink():
+                    destination.unlink()
+                continue
             else:
                 continue
             self.chroot.run_in_chroot(command, check=False)
@@ -186,6 +211,13 @@ class SystemCustomizer:
                     unit_path.unlink()
                 unit_path.parent.mkdir(parents=True, exist_ok=True)
                 unit_path.symlink_to(Path("/dev/null"))
+
+    @staticmethod
+    def _service_name(service: str, init_system: str) -> str:
+        if init_system == "systemd":
+            return service
+        name = service.removesuffix(".service")
+        return {"NetworkManager": "network-manager"}.get(name, name)
 
     def _detect_desktop_session(self) -> str:
         session = self.config.get("desktop_session") or self.config.get("desktop")
@@ -221,18 +253,13 @@ class SystemCustomizer:
         # Ensure PAM autologin configuration files permit passwordless login across all display managers
         pam_autologin_content = (
             "#%PAM-1.0\n"
-            "auth        sufficient  pam_permit.so\n"
-            "account     sufficient  pam_permit.so\n"
-            "password    sufficient  pam_permit.so\n"
-            "session     required    pam_limits.so\n"
-            "session     sufficient  pam_permit.so\n"
+            "auth        required    pam_permit.so\n"
+            "@include common-account\n"
+            "@include common-session\n"
         )
         for pam_service in [
-            "lightdm", "lightdm-autologin",
-            "sddm", "sddm-autologin",
-            "gdm", "gdm-autologin", "gdm-password", "gdm3",
-            "lxdm", "lxdm-autologin",
-            "slim"
+            "lightdm-autologin", "sddm-autologin", "gdm-autologin",
+            "lxdm-autologin",
         ]:
             pam_file = self.target_root / "etc" / "pam.d" / pam_service
             pam_file.parent.mkdir(parents=True, exist_ok=True)
@@ -244,7 +271,7 @@ class SystemCustomizer:
             sddm_conf.parent.mkdir(parents=True, exist_ok=True)
             sddm_conf.write_text(
                 f"[Autologin]\nUser={live_user}\nSession={session_name}\nRelogin=false\n\n"
-                f"[General]\nDisplayServer=x11\n"
+                f"[General]\nDisplayServer={'wayland' if self.config.get('session_type') == 'wayland' else 'x11'}\n"
             )
 
         # Set default-display-manager if lightdm or sddm is active
@@ -283,7 +310,7 @@ class SystemCustomizer:
             "autologin-user-timeout=0\n"
             "autologin-in-background=false\n"
             f"autologin-session={session_name}\n"
-            "pam-service=lightdm-autologin\n"
+            "pam-service=lightdm\n"
             "pam-autologin-service=lightdm-autologin\n"
             "\n"
             "[SeatDefaults]\n"
@@ -292,7 +319,7 @@ class SystemCustomizer:
             "autologin-user-timeout=0\n"
             "autologin-in-background=false\n"
             f"autologin-session={session_name}\n"
-            "pam-service=lightdm-autologin\n"
+            "pam-service=lightdm\n"
             "pam-autologin-service=lightdm-autologin\n"
         )
         for conf_rel in ["etc/lightdm/lightdm.conf", "etc/lightdm/lightdm.conf.d/50-autologin.conf"]:
@@ -355,16 +382,14 @@ class SystemCustomizer:
             return
         if not self.config.get("with_flathub", False):
             return
-        flatpak_dir = self.target_root / "etc" / "flatpak" / "remotes.d"
-        flatpak_dir.mkdir(parents=True, exist_ok=True)
-        with open(flatpak_dir / "flathub.flatpakrepo", "w") as f:
-            f.write(
-                "[Flatpak Remote]\n"
-                "Title=Flathub\n"
-                "Url=https://dl.flathub.org/repo/\n"
-                "GPGKey=https://dl.flathub.org/repo/flathub.gpg\n"
-                "Homepage=https://flathub.org/\n"
-            )
+        # Import the official descriptor, including its embedded signing key.
+        # GPGKey in a .flatpakrepo is base64 data, not a key download URL.
+        stale = self.target_root / "etc/flatpak/remotes.d/flathub.flatpakrepo"
+        stale.unlink(missing_ok=True)
+        self.chroot.run_in_chroot([
+            "flatpak", "remote-add", "--system", "--if-not-exists",
+            "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo",
+        ], check=True)
 
     def configure_network_sharing(self):
         """Install conservative SMB defaults for Linux/Windows interoperability."""
@@ -504,6 +529,7 @@ class SystemCustomizer:
         (polkit_dir / "49-calamares.rules").write_text(
             "/* Allow live user to launch calamares installer via pkexec without password prompt */\n"
             "polkit.addRule(function(action, subject) {\n"
+            "    if (!subject.local || !subject.active || !subject.isInGroup('sudo')) return;\n"
             "    if ((action.id === 'org.freedesktop.policykit.exec' && action.lookup('program') === '/usr/bin/calamares') ||\n"
             "        action.id.indexOf('com.github.calamares.') === 0 ||\n"
             "        action.id.indexOf('io.calamares.') === 0) {\n"
@@ -511,6 +537,13 @@ class SystemCustomizer:
             "    }\n"
             "});\n"
         )
+
+        live_user = self.config.get("live_user", "liveuser")
+        if isinstance(live_user, dict):
+            live_user = live_user.get("name", "liveuser")
+        removeuser = self.target_root / "etc/calamares/modules/removeuser.conf"
+        removeuser.parent.mkdir(parents=True, exist_ok=True)
+        removeuser.write_text(f"---\nusername: {live_user}\n")
 
         desktop_entry = (
             "[Desktop Entry]\n"
@@ -724,6 +757,9 @@ class SystemCustomizer:
 
     def configure_live_environment(self):
         self.configure_locales()
+        # Install skel files and theme assets before creating users and
+        # selecting themes. Runtime settings must use the selected profiles.
+        self.copy_custom_files()
         self.setup_live_users()
         self.configure_system_defaults()
         self.configure_dbus_launch()
@@ -739,7 +775,6 @@ class SystemCustomizer:
         self.configure_polkit_power()
         self.configure_calamares()
         self.configure_artwork()
-        self.copy_custom_files()
         if self.config.get("with_offline_repo"):
             self.configure_offline_repository()
         self.configure_machine_id()
@@ -842,6 +877,8 @@ class SystemCustomizer:
             # locations. Unknown groups are kept under /usr/local/share so a
             # typo can never create an unexpected /<name> directory.
             destination_prefixes = {
+                "themes": Path("usr/share/themes"),
+                "icons": Path("usr/share/icons"),
                 "backgrounds": Path("usr/share/backgrounds"),
                 "dconf": Path("etc/dconf"),
                 "autostart": Path("etc/xdg/autostart"),

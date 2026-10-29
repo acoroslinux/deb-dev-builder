@@ -1,0 +1,6 @@
+{
+  "packages": ["systemd-boot"],
+  "bootloader": {
+    "type": "systemd-boot"
+  }
+}

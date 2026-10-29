@@ -286,6 +286,15 @@ class BuildOrchestrator:
             errors.append(f"Debian Installer mode '{self.di_mode}' requires --with-debian-installer.")
         if self.with_debian_installer and self.config.get("base_distro") != "debian":
             errors.append("Official Debian Installer media can only be built from Debian profiles.")
+        if self.with_debian_installer and self.output_format not in {"iso", "netboot"}:
+            errors.append("Debian Installer requires ISO or netboot output.")
+        if (self.with_offline_repo or self.offline_repo_packages) and self.output_format != "iso":
+            errors.append("The offline repository requires ISO output.")
+        if self.output_format == "iso" and self.config.get("bootloader_type") not in {"grub2-hybrid", "grub2-uefi", "grub2-bios", "syslinux"}:
+            errors.append("ISO output requires a GRUB2 or syslinux bootloader profile.")
+        if self.config.get("bootloader_type") == "syslinux" and self.output_format in {"img", "raw", "qcow2", "vmdk", "vdi", "vhd", "vhdx"}:
+            if self.arch not in {"amd64", "x86_64", "i386", "i686"} or self.fs_type != "ext4":
+                errors.append("Syslinux disk output requires x86 and an ext4 root filesystem.")
         if self.di_mode == "netinstall" and self.output_format != "iso":
             errors.append("Debian Installer netinstall mode requires ISO output.")
         if self.di_mode == "netboot" and self.output_format != "netboot":
@@ -430,7 +439,9 @@ class BuildOrchestrator:
         elif self.output_format == "netboot":
             required_tools = ["tar", "gzip"]
         elif self.output_format in {"img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi"}:
-            required_tools = ["truncate", "mke2fs", "mkfs.fat", "mcopy", "parted", "qemu-img"]
+            required_tools = ["truncate", "mke2fs", "mkfs.fat", "mcopy", "parted", "qemu-img", "grub-mkstandalone", "grub-install", "losetup"]
+            if self.config.get("bootloader_type") == "syslinux":
+                required_tools.append("extlinux")
             if self.config.get("compression"):
                 compressor = {"xz": "xz", "gzip": "gzip", "lz4": "lz4"}.get(self.config["compression"], "zstd")
                 required_tools.append(compressor)
@@ -547,32 +558,8 @@ class BuildOrchestrator:
             customizer = SystemCustomizer(chroot, self.config)
             customizer.configure_live_environment()
             
-            # --- INSTALL BOOTLOADER IN CHROOT (DEBIAN SPECIFIC) ---
-            disk_formats = {"img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi"}
-            if self.output_format in disk_formats:
-                bcfg = self.config.get("bootloader", {})
-                btype = bcfg.get("type", "") if isinstance(bcfg, dict) else (bcfg or "")
-                
-                if self.mode == "real":
-                    if "grub" in btype:
-                        print(f"\n[ORCHESTRATOR] Installing GRUB Bootloader ({btype}) into chroot /boot/efi...")
-                        chroot.run_in_chroot(["mkdir", "-p", "/boot/efi/EFI"])
-                        grub_target = {
-                            "amd64": "x86_64-efi", "x86_64": "x86_64-efi",
-                            "i386": "i386-efi", "i686": "i386-efi",
-                            "aarch64": "arm64-efi", "arm64": "arm64-efi",
-                            "armhf": "arm-efi", "riscv64": "riscv64-efi",
-                        }.get(self.arch, "x86_64-efi")
-                        chroot.run_in_chroot(["grub-install", f"--target={grub_target}", "--efi-directory=/boot/efi", "--bootloader-id=debian", "--removable", "--no-nvram"], check=True)
-                        chroot.run_in_chroot(["grub-mkconfig", "-o", "/boot/grub/grub.cfg"], check=True)
-                    elif "systemd-boot" in btype:
-                        print(f"\n[ORCHESTRATOR] Installing systemd-boot Bootloader ({btype}) into chroot /boot/efi...")
-                        chroot.run_in_chroot(["mkdir", "-p", "/boot/efi/EFI"])
-                        chroot.run_in_chroot(["bootctl", "install", "--esp-path=/boot/efi"], check=False)
-                else:
-                    print(f"\n[MOCK] Simulated bootloader installation: {btype}")
-            # ----------------------------------------------------
-
+            # DiskEngine builds removable boot files after hooks, without
+            # probing the host filesystem or writing firmware NVRAM.
             hooks.run_stage("chroot")
             chroot.umount_virtual_fs()
             unmount_all_under(self.target_root)
