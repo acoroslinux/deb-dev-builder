@@ -1,0 +1,35 @@
+{
+  "executable": "/usr/bin/calamares",
+  "cmdline_file": "/proc/cmdline",
+  "desktop_directory_fallback": "Desktop",
+  "launcher_filename": "install-deb-dev.desktop",
+  "application_launcher": "usr/share/applications/install-system.desktop",
+  "autostart_launcher": "etc/xdg/autostart/create-install-icon.desktop",
+  "helper_script": "usr/local/bin/add-installer-desktop-icon.sh",
+  "polkit_rule": "etc/polkit-1/rules.d/49-calamares.rules",
+  "removeuser_config": "etc/calamares/modules/removeuser.conf",
+  "cleanup_config": "etc/calamares/modules/cleanup-live-installer.conf",
+  "prepare_config": "etc/calamares/modules/prepare-install-target.conf",
+  "prepare_script": "usr/lib/deb-dev-builder/prepare-install-target",
+  "validate_config": "etc/calamares/modules/validate-installed-boot.conf",
+  "validate_script": "usr/lib/deb-dev-builder/validate-installed-boot",
+  "validation_timeout": 300,
+  "cleanup_search_roots": [
+    "home",
+    "etc/skel"
+  ],
+  "cleanup_timeout": 60,
+  "packages_config": "etc/calamares/modules/packages.conf",
+  "display_manager_config": "etc/calamares/modules/displaymanager.conf",
+  "display_manager_aliases": {
+    "gdm3": "gdm"
+  },
+  "packages_backend": "apt",
+  "desktop_entry": "[Desktop Entry]\nVersion=1.0\nType=Application\nName=Install System\nComment=Install system to disk\nTryExec={executable}\nExec=pkexec {executable}\nIcon=system-software-install\nTerminal=false\nCategories=System;Qt;\nStartupNotify=true\n",
+  "autostart_entry": "[Desktop Entry]\nType=Application\nName=Create Install Icon\nTryExec={executable}\nExec=/{helper_script}\nIcon=system-software-install\nTerminal=false\nNoDisplay=true\n",
+  "cleanup_i18n": {
+    "name": "Remove live installer shortcuts"
+  },
+  "keyfile_config": "etc/calamares/modules/configure-encrypted-unlock.conf",
+  "keyfile_script": "usr/lib/deb-dev-builder/configure-encrypted-unlock"
+}

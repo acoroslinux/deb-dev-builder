@@ -19,6 +19,23 @@ def make_orchestrator(tmp_path=None, **kwargs) -> BuildOrchestrator:
     return orch
 
 class TestOrchestrator:
+    def test_live_debian_installer_always_prepares_offline_boot_repository(self, tmp_path, monkeypatch):
+        from deb_dev_builder.core.apt_manager import APTManager
+        calls = []
+        original = APTManager.download_offline_package_sets
+        def download(manager, groups, destination):
+            calls.append(groups)
+            return original(manager, groups, destination)
+        monkeypatch.setattr(APTManager, "download_offline_package_sets", download)
+        build = make_orchestrator(tmp_path=tmp_path, desktop="xfce", with_debian_installer=True)
+        assert not build.with_offline_repo
+        build.build(output_name=str(tmp_path / "installer"))
+        from deb_dev_builder.core.runtime_config import installer_storage_packages
+        assert calls == [[*build.runtime["installer"]["offline_package_sets"]["amd64"],
+                          installer_storage_packages(build.config, build.runtime)]]
+        assert build.config["with_offline_repo"] is True
+        assert Path(build.config["offline_repo_dir"]).is_dir()
+
     def test_construction(self):
         orch = make_orchestrator()
         assert orch.arch == "amd64"
@@ -126,7 +143,7 @@ class TestOrchestrator:
         assert make_orchestrator(with_calamares=True).validate()["valid"] is False
         assert make_orchestrator(
             distro="devuan-5", init_system="sysvinit", with_debian_installer=True
-        ).validate()["valid"] is False
+        ).validate()["valid"] is True
         assert make_orchestrator(
             with_debian_installer=True, di_mode="netinstall", output_format="iso"
         ).validate()["valid"] is True
@@ -212,6 +229,7 @@ def test_three_hook_phases_follow_build_lifecycle_and_always_unmount(
     monkeypatch.setattr(module.SystemCustomizer, "configure_live_environment",
                         lambda self: events.append("customize"))
     monkeypatch.setattr(module.ChrootCleaner, "clean", lambda self: {"removed": 0})
+    monkeypatch.setattr(module, "audit_installer_root", lambda *args, **kwargs: {})
 
     def build_artifact(self, *args, **kwargs):
         events.append("artifact")
@@ -280,3 +298,26 @@ def test_real_build_lock_prevents_concurrent_cleanup_and_releases_on_failure(tmp
     with lock_path.open("a+") as other:
         fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
     assert calls == [None]
+
+
+def test_output_ownership_does_not_follow_links_outside_artifact_directory(tmp_path, monkeypatch):
+    import os
+
+    output = tmp_path / "output"
+    output.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "file").write_text("preserved")
+    (output / "file-link").symlink_to(external / "file")
+    (output / "directory-link").symlink_to(external, target_is_directory=True)
+    calls = []
+
+    def chown(path, uid, gid, *, follow_symlinks=True):
+        assert follow_symlinks is False
+        calls.append(Path(path))
+
+    monkeypatch.setenv("SUDO_UID", "1000")
+    monkeypatch.setenv("SUDO_GID", "1000")
+    monkeypatch.setattr(os, "chown", chown)
+    make_orchestrator()._fix_output_permissions(output)
+    assert set(calls) == {output, output / "file-link", output / "directory-link"}

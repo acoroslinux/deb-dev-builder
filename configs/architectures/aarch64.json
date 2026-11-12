@@ -1,4 +1,27 @@
 {
   "arch": "aarch64",
-  "dpkg_arch": "arm64"
+  "dpkg_arch": "arm64",
+  "aliases": [
+    "arm64"
+  ],
+  "kernel_suffix": "arm64",
+  "image": {
+    "efi_target": "arm64-efi",
+    "efi_filename": "BOOTAA64.EFI",
+    "efi_suffix": "aa64",
+    "bios": false,
+    "iso_packages": [
+      "grub-efi-arm64-bin"
+    ],
+    "disk_grub_package": "grub-efi-arm64-bin",
+    "excluded_package_prefixes": [
+      "grub-pc",
+      "grub-efi-amd64",
+      "grub-efi-ia32",
+      "isolinux",
+      "syslinux",
+      "shim-signed"
+    ],
+    "compatibility_efi_architectures": []
+  }
 }

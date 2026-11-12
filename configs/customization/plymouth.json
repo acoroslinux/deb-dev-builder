@@ -1,0 +1,72 @@
+{
+  "name": "deb-dev-modern",
+  "directory": "usr/share/plymouth/themes/deb-dev-modern",
+  "binary": "usr/bin/plymouth",
+  "selector": "usr/sbin/plymouth-set-default-theme",
+  "select_command": [
+    "plymouth-set-default-theme"
+  ],
+  "required_initramfs_paths": [
+    "usr/bin/plymouth",
+    "usr/sbin/plymouthd",
+    "usr/share/plymouth/themes/deb-dev-modern/deb-dev-modern.plymouth",
+    "usr/share/plymouth/themes/deb-dev-modern/deb-dev-modern.script",
+    "usr/share/plymouth/themes/deb-dev-modern/splash.png"
+  ],
+  "initramfs_path_aliases": {
+    "usr/bin/plymouth": [
+      "bin/plymouth"
+    ],
+    "usr/sbin/plymouthd": [
+      "sbin/plymouthd"
+    ]
+  },
+  "required_initramfs_patterns": [
+    "/plymouth/script[.]so$",
+    "/plymouth/label(-pango|-freetype)?[.]so$"
+  ],
+  "script_file": "usr/share/plymouth/themes/deb-dev-modern/deb-dev-modern.script",
+  "visual": {
+    "title": "Deb-Dev Modern",
+    "subtitle": "Debian & Devuan GNU/Linux",
+    "title_font": "Sans Light 32",
+    "subtitle_font": "Sans 13",
+    "message_font": "Sans 12",
+    "top_red": 0.025,
+    "top_green": 0.04,
+    "top_blue": 0.075,
+    "bottom_red": 0.055,
+    "bottom_green": 0.025,
+    "bottom_blue": 0.09,
+    "accent_red": 0.25,
+    "accent_green": 0.78,
+    "accent_blue": 1.0,
+    "background_opacity": 0.16,
+    "title_y": 0.36,
+    "subtitle_y": 0.44,
+    "dots_y": 0.54,
+    "progress_y": 0.61,
+    "prompt_y": 0.72,
+    "entry_y": 0.79,
+    "message_y": 0.9,
+    "bar_fraction": 0.28,
+    "bar_height": 12,
+    "dot_count": 5,
+    "dot_spacing": 24,
+    "dot_frames": 10,
+    "dot_symbol": "●",
+    "bar_symbol": "━",
+    "media_removal_message": "Please remove the live-medium, close the tray (if any) and press ENTER to continue:",
+    "media_title": "Remove the installation medium",
+    "media_hint": "Press ENTER to continue",
+    "media_title_y": 0.66,
+    "media_hint_y": 0.73,
+    "entry_symbol": "█",
+    "entry_fraction": 0.38,
+    "entry_height": 34,
+    "entry_border": 2,
+    "entry_hint": "Enter your passphrase and press ENTER",
+    "entry_hint_y": 0.86
+  },
+  "media_translations": {}
+}

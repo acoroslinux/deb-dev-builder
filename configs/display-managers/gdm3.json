@@ -1,0 +1,18 @@
+{
+  "binaries": [
+    "usr/sbin/gdm3",
+    "usr/bin/gdm3"
+  ],
+  "service": "gdm3",
+  "pam_service": "gdm-autologin",
+  "executable": "/usr/sbin/gdm3",
+  "live_xorg_suites": {
+    "devuan": ["daedalus"]
+  },
+  "files": {
+    "etc/gdm/custom.conf": "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin={live_user}\nTimedLoginEnable=true\nTimedLogin={live_user}\nTimedLoginDelay=0\n",
+    "etc/gdm3/custom.conf": "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin={live_user}\nTimedLoginEnable=true\nTimedLogin={live_user}\nTimedLoginDelay=0\n",
+    "etc/gdm/daemon.conf": "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin={live_user}\nTimedLoginEnable=true\nTimedLogin={live_user}\nTimedLoginDelay=0\n",
+    "etc/gdm3/daemon.conf": "[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin={live_user}\nTimedLoginEnable=true\nTimedLogin={live_user}\nTimedLoginDelay=0\n"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "reproducibility": {"source_date_epoch": null},
+  "report": {
+    "enabled": true,
+    "suffix": ".build.json",
+    "configuration_fields": ["architecture", "dpkg_arch", "distro", "base_distro", "suite", "desktop", "init_system", "kernel", "bootloader_type", "fs_type", "di_mode", "output_format", "compression", "with_calamares", "with_debian_installer", "software", "live_remove_packages", "installer_bundle"],
+    "tool_commands": [["xorriso", "-version"], ["mksquashfs", "-version"], ["grub-mkstandalone", "--version"]]
+  },
+  "packages": {
+    "live_only": ["calamares", "calamares-settings-debian", "live-boot", "live-boot-doc", "live-boot-initramfs-tools", "live-config", "live-config-doc", "live-config-systemd", "live-config-sysvinit", "live-config-runit", "live-tools", "debian-installer-launcher"],
+    "keep_installed": [],
+    "foreign_architectures": [],
+    "local_debs": [],
+    "build_only_sources": [],
+    "build_sources_path": "etc/apt/sources.list.d/deb-dev-build-only.list",
+    "local_repository": "var/lib/deb-dev-builder/local-packages",
+    "local_source": "etc/apt/sources.list.d/deb-dev-local-packages.list"
+  },
+  "capability_rules": [
+    {"when": {"with_calamares": true}, "require": {"di_mode": ["live"], "output_format": ["iso"]}, "message": "Calamares requires live ISO output."},
+    {"when": {"with_debian_installer": true}, "require": {"base_distro": ["debian", "devuan"], "output_format": ["iso", "netboot"]}, "message": "Native d-i requires Debian or Devuan ISO/netboot output."}
+  ]
+}

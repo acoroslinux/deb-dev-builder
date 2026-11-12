@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from deb_dev_builder.core.path_utils import resolve_from_project
+from deb_dev_builder.core.runtime_config import load_runtime, merge_settings, architecture_settings, RuntimeConfigError, catalog_document_paths
 
 class ConfigLoaderError(Exception):
     """Exception raised for configuration loading errors."""
@@ -32,6 +33,9 @@ class ConfigLoader:
         if not profile_name or Path(str(profile_name)).name != str(profile_name):
             raise ConfigLoaderError(f"Invalid {category} profile name: {profile_name!r}")
         path = self.config_root / category / f"{profile_name}.json"
+        catalog = self.config_root / "catalog.json"
+        if catalog.exists() and path.resolve() in catalog_document_paths(catalog):
+            raise ConfigLoaderError(f"Configuration document is not a selectable {category} profile: {profile_name}")
         if not path.exists() and not required:
             return {}
         return self.load_json(path)
@@ -50,7 +54,9 @@ class ConfigLoader:
     def _merge_dicts(self, base: Dict[str, Any], update: Dict[str, Any]) -> Dict[str, Any]:
         result = base.copy()
         for key, value in update.items():
-            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            if key == "runtime" and isinstance(value, dict):
+                result[key] = merge_settings(result.get(key, {}), value)
+            elif key in result and isinstance(result[key], dict) and isinstance(value, dict):
                 result[key] = self._merge_dicts(result[key], value)
             elif key in result and isinstance(result[key], list) and isinstance(value, list):
                 existing = list(result[key])
@@ -60,22 +66,40 @@ class ConfigLoader:
                 result[key] = value
         return result
 
+    def _desktop_distribution_profile(self, profile, family, distro):
+        """Apply package differences declared by a desktop for a distribution."""
+        profile = dict(profile)
+        overrides = profile.pop('distribution_overrides', {})
+        if not isinstance(overrides, dict):
+            raise ConfigLoaderError('Desktop distribution_overrides must be an object')
+        for selector, values in overrides.items():
+            if not isinstance(selector, str) or not selector or not isinstance(values, dict):
+                raise ConfigLoaderError('Desktop distribution overrides require named objects')
+            if set(values) - {'packages', 'exclude_packages', 'backports_mirror', 'backports_suite', 'apt_target_release', 'display_manager', 'session_type'}:
+                raise ConfigLoaderError('Desktop distribution overrides only accept package, session and backports settings')
+            for key, packages in values.items():
+                if key == 'session_type':
+                    if not isinstance(packages, str) or packages not in {'x11', 'wayland', 'both'}:
+                        raise ConfigLoaderError('Desktop session_type must be x11, wayland or both')
+                elif key in {'backports_mirror', 'backports_suite', 'apt_target_release', 'display_manager'}:
+                    if not isinstance(packages, str) or not packages or any(char.isspace() for char in packages):
+                        raise ConfigLoaderError('Desktop repository and manager settings must be nonempty strings without whitespace')
+                elif not isinstance(packages, list) or not all(isinstance(p, str) and p for p in packages):
+                    raise ConfigLoaderError('Desktop distribution override packages must be string lists')
+        for selector in dict.fromkeys((family, distro)):
+            if selector in overrides:
+                profile = self._merge_dicts(profile, overrides[selector])
+        return profile
+
     @staticmethod
-    def _architecture_kernel_packages(kernel: Optional[str], dpkg_arch: str) -> List[str]:
-        suffixes = {
-            "amd64": "amd64",
-            "i386": "686-pae",
-            "arm64": "arm64",
-            "armhf": "armmp",
-            "riscv64": "riscv64",
-        }
-        suffix = suffixes.get(dpkg_arch, dpkg_arch)
-        flavor = (kernel or "generic").lower()
-        if flavor in {"rt", "kernel-rt"}:
-            return [f"linux-image-rt-{suffix}", f"linux-headers-rt-{suffix}"]
-        if flavor == "cloud":
-            return [f"linux-image-cloud-{suffix}", f"linux-headers-cloud-{suffix}"]
-        return [f"linux-image-{suffix}", f"linux-headers-{suffix}"]
+    def _architecture_kernel_packages(kernel: Optional[str], dpkg_arch: str, runtime=None) -> List[str]:
+        runtime = runtime or load_runtime()
+        suffix = architecture_settings({"dpkg_arch": dpkg_arch}, runtime)["kernel_suffix"]
+        policy = runtime["build"]
+        flavor = (kernel or runtime["cli"]["kernel"]).lower()
+        flavor = policy["kernel_aliases"].get(flavor, flavor)
+        templates = policy["kernel_packages"].get(flavor, policy["kernel_packages"][runtime["cli"]["kernel"]])
+        return [template.format(suffix=suffix) for template in templates]
 
     def assemble_build_config(
         self,
@@ -95,7 +119,14 @@ class ConfigLoader:
         vm_profile: Optional[str] = None,
     ) -> Dict[str, Any]:
 
-        architecture = {"x86_64": "amd64", "i686": "i386"}.get(architecture, architecture)
+        runtime_path = self.config_root / "catalog.json"
+        runtime_input = self.load_json(global_config_path)
+        if distro:
+            family = self.load_profile("system", distro).get("base_distro")
+            if family:
+                runtime_input = {**runtime_input, "base_distro": family}
+        runtime = load_runtime(runtime_input, path=runtime_path if runtime_path.is_file() else None)
+        architecture = runtime["architecture_aliases"].get(architecture, architecture)
 
         config = {
             "software": [],
@@ -112,6 +143,12 @@ class ConfigLoader:
             "boot": {},
             "variant_info": {}
         }
+        config["runtime"] = runtime
+
+        # The default live account has its own profile, just like admin and
+        # guest. Do not inherit its credentials into another named account.
+        if not live_profile:
+            config["live_user"] = self.load_profile("live-users", runtime["build"]["default_live_profile"]).get("live_user", {})
 
         # Project-wide customization defaults are part of the catalog, not a
         # dead standalone file. More specific profiles and CLI overrides win.
@@ -137,14 +174,14 @@ class ConfigLoader:
         arch_profile = self.load_profile("architectures", architecture)
         if arch_profile.get("arch") != architecture:
             raise ConfigLoaderError(f"Architecture profile {architecture!r} has mismatched 'arch' value")
-        config = self._merge_dicts(config, self._normalize_profile(arch_profile))
+        config = self._merge_dicts(config, self._normalize_profile({key: value for key, value in arch_profile.items() if key not in {"aliases", "image", "kernel_suffix"}}))
         config["architecture"] = arch_profile["arch"]
         config["dpkg_arch"] = arch_profile.get("dpkg_arch", architecture)
 
         if hardware_profile:
             hardware = self.load_profile("hardware", hardware_profile)
             hardware_arch = hardware.get("architecture")
-            aliases = {"x86_64": "amd64", "i686": "i386"}
+            aliases = runtime["architecture_aliases"]
             if aliases.get(hardware_arch, hardware_arch) != aliases.get(architecture, architecture):
                 raise ConfigLoaderError(
                     f"Hardware profile {hardware_profile!r} requires architecture {hardware_arch!r}"
@@ -172,6 +209,7 @@ class ConfigLoader:
         # 6. Desktop
         if desktop:
             desktop_profile = self.load_profile("desktops", desktop)
+            desktop_profile = self._desktop_distribution_profile(desktop_profile, config.get('base_distro'), distro)
             config = self._merge_dicts(config, self._normalize_profile(desktop_profile))
             session_type = desktop_profile.get("session_type", "x11")
             if session_type in {"x11", "both"}:
@@ -181,6 +219,7 @@ class ConfigLoader:
 
         # 7. Kernel
         if kernel:
+            kernel = runtime["build"]["kernel_aliases"].get(kernel.lower(), kernel.lower())
             config = self._merge_dicts(config, self._normalize_profile(self.load_profile("system", kernel)))
 
         # 8. Bootloader
@@ -214,11 +253,17 @@ class ConfigLoader:
             config["live_user"] = self._merge_dicts(config.get("live_user", {}), live_user_profile)
             # A named live-user profile is authoritative for group membership.
             # Appending here would make the low-privilege guest inherit sudo
-            # from base_customizations.json.
+            # from global customization settings.
             if "groups" in live_user_profile:
                 config["live_user"]["groups"] = list(live_user_profile["groups"])
 
         # 14. Deduplicate lists
+        # NetworkManager split its GTK tools in testing/unstable. Keep older
+        # release profiles on their native package, and use the new names where
+        # the transitional network-manager-gnome package has been removed.
+        package_aliases = runtime['build']['package_aliases']
+        config['software'] = [replacement for package in config['software']
+                              for replacement in package_aliases.get(package, {}).get(config.get('suite'), [package])]
         for key in ["software", "exclude_packages", "groups", "repos", "kernel_packages"]:
             if key in config and isinstance(config[key], list):
                 config[key] = list(dict.fromkeys(config[key]))
@@ -234,7 +279,7 @@ class ConfigLoader:
             package for package in config.get("software", [])
             if not package.startswith(("linux-image-", "linux-headers-"))
         ]
-        for package in self._architecture_kernel_packages(kernel, config["dpkg_arch"]):
+        for package in self._architecture_kernel_packages(kernel, config["dpkg_arch"], config["runtime"]):
             if package not in software:
                 software.append(package)
         excluded = set(config.get("exclude_packages", []))
@@ -245,10 +290,15 @@ class ConfigLoader:
     def audit_catalog(self) -> List[str]:
         """Return semantic errors found across every JSON configuration file."""
         errors: List[str] = []
+        catalog_path = self.config_root / "catalog.json"
+        try:
+            module_documents = catalog_document_paths(catalog_path) if catalog_path.exists() else set()
+        except RuntimeConfigError as exc:
+            return [str(exc)]
         allowed = {
-            "architectures": {"arch", "dpkg_arch"},
+            "architectures": {"arch", "dpkg_arch", "aliases", "image", "kernel_suffix"},
             "boot": {"packages", "bootloader"},
-            "desktops": {"desktop", "display_manager", "session_type", "supported_suites", "packages", "exclude_packages"},
+            "desktops": {"desktop", "display_manager", "session_type", "supported_suites", "packages", "exclude_packages", "distribution_overrides"},
             "hardware": {
                 "name", "architecture", "bootloader", "output_format", "status", "notes",
                 "packages", "partition_start_mib", "firmware_tree", "boot_artifacts",
@@ -264,6 +314,7 @@ class ConfigLoader:
                 "security_mirror", "security_suite", "updates_mirror", "updates_suite",
                 "backports_mirror", "backports_suite", "components", "init_system",
                 "kernel", "variant", "packages", "exclude_packages", "supported_suites",
+                "package_templates", "live_config_package", "zram_package",
             },
         }
         identity_keys = {
@@ -272,6 +323,8 @@ class ConfigLoader:
         for category, keys in allowed.items():
             category_dir = self.config_root / category
             for path in sorted(category_dir.glob("*.json")):
+                if path.resolve() in module_documents:
+                    continue
                 try:
                     data = self.load_json(path)
                 except ConfigLoaderError as exc:
@@ -280,6 +333,11 @@ class ConfigLoader:
                 unknown = sorted(set(data) - keys)
                 if unknown:
                     errors.append(f"{path}: unknown keys: {', '.join(unknown)}")
+                if category == 'desktops':
+                    try:
+                        self._desktop_distribution_profile(data, None, None)
+                    except ConfigLoaderError as exc:
+                        errors.append(f'{path}: {exc}')
                 identity = identity_keys.get(category)
                 if identity and data.get(identity) != path.stem:
                     errors.append(f"{path}: '{identity}' must match filename")
@@ -401,8 +459,12 @@ class ConfigLoader:
         global_path = self.config_root / "global_build.json"
         try:
             global_data = self.load_json(global_path)
-            if set(global_data) - {"system", "boot", "hooks", "cleanup", "toolchain"}:
+            runtime_path = self.config_root / "catalog.json"
+            load_runtime(global_data, path=runtime_path if runtime_path.is_file() else None)
+            if set(global_data) - {"system", "boot", "hooks", "cleanup", "toolchain", "live_user", "runtime"}:
                 errors.append(f"{global_path}: unknown top-level keys")
+            if "live_user" in global_data and not isinstance(global_data["live_user"], dict):
+                errors.append(f"{global_path}: live_user must be an object")
             system = global_data.get("system")
             if not isinstance(system, dict) or set(system) - {"hostname", "timezone", "locale", "iso_label", "apt_cache"}:
                 errors.append(f"{global_path}: invalid system settings")
@@ -430,7 +492,7 @@ class ConfigLoader:
                     errors.append(f"{global_path}: system.{key} must be a non-empty string")
             if not isinstance(boot.get("kernel_params"), str) or not boot.get("kernel_params"):
                 errors.append(f"{global_path}: boot.kernel_params must be a non-empty string")
-        except ConfigLoaderError as exc:
+        except (ConfigLoaderError, RuntimeConfigError) as exc:
             errors.append(str(exc))
 
         customizations_path = self.config_root / "base_customizations.json"
@@ -438,13 +500,14 @@ class ConfigLoader:
             customizations = self.load_json(customizations_path)
             if set(customizations) - {"live_user", "custom_files", "base_copy_files"}:
                 errors.append(f"{customizations_path}: unknown top-level keys")
-            live_user = customizations.get("live_user")
-            if not isinstance(live_user, dict) or not isinstance(live_user.get("name"), str):
-                errors.append(f"{customizations_path}: invalid live_user settings")
-            elif not isinstance(live_user.get("groups"), list) or not all(
-                isinstance(group, str) and group for group in live_user["groups"]
-            ):
-                errors.append(f"{customizations_path}: live_user.groups must be a list of non-empty strings")
+            if "live_user" in customizations:
+                live_user = customizations["live_user"]
+                if not isinstance(live_user, dict) or not isinstance(live_user.get("name"), str):
+                    errors.append(f"{customizations_path}: invalid live_user settings")
+                elif not isinstance(live_user.get("groups"), list) or not all(
+                    isinstance(group, str) and group for group in live_user["groups"]
+                ):
+                    errors.append(f"{customizations_path}: live_user.groups must be a list of non-empty strings")
         except ConfigLoaderError as exc:
             errors.append(str(exc))
 

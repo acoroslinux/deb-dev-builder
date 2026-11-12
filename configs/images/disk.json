@@ -1,0 +1,24 @@
+{
+  "root_slack_mib": 600,
+  "root_extra_mib": 10,
+  "efi_size_mib": 300,
+  "partition_start_mib": 1,
+  "partition_slack_mib": 3,
+  "kernel_params": "quiet",
+  "live_kernel_options": [
+    "boot=live",
+    "components",
+    "union=overlay",
+    "rd.live.image"
+  ],
+  "compression_levels": {
+    "zstd": 19,
+    "zstd_fast": 3,
+    "xz": 9,
+    "gzip": 9,
+    "lz4": 9
+  },
+  "qemu_formats": {
+    "vhd": "vpc"
+  }
+}

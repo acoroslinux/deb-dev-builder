@@ -1,4 +1,10 @@
 {
   "init_system": "sysvinit",
-  "packages": ["sysvinit-core", "elogind"]
+  "packages": [
+    "sysvinit-core",
+    "elogind",
+    "libpam-elogind"
+  ],
+  "live_config_package": "live-config-sysvinit",
+  "zram_package": "zram-tools"
 }

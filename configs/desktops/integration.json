@@ -1,0 +1,341 @@
+{
+  "minimal_desktops": [
+    "i3",
+    "sway",
+    "hyprland"
+  ],
+  "launcher": "usr/local/libexec/deb-dev-session-start",
+  "autostart": "etc/xdg/autostart/deb-dev-minimal-session.desktop",
+  "polkit_agent": "usr/libexec/polkit-mate-authentication-agent-1",
+  "polkit_agent_fallbacks": [
+    "usr/lib/mate-polkit/polkit-mate-authentication-agent-1"
+  ],
+  "sway_dropin": "etc/sway/config.d/60-deb-dev-session.conf",
+  "hyprland_examples": [
+    "usr/share/hypr/hyprland.lua",
+    "usr/share/hypr/hyprland.conf",
+    "usr/share/hyprland/hyprland.conf"
+  ],
+  "hyprland_skel": "etc/skel/.config/hypr",
+  "sddm_config": "etc/sddm.conf.d/60-deb-dev-wayland-session.conf",
+  "sddm_launcher": "usr/local/libexec/deb-dev-wayland-session",
+  "sddm_session_candidates": [
+    "usr/share/sddm/scripts/wayland-session",
+    "etc/sddm/wayland-session"
+  ],
+  "x11_sessions": {
+    "awesome": {
+      "command": [
+        "awesome"
+      ],
+      "start_terminal": false
+    },
+    "bspwm": {
+      "command": [
+        "bspwm"
+      ],
+      "start_terminal": false
+    },
+    "dwm": {
+      "command": [
+        "dwm"
+      ],
+      "start_terminal": false
+    },
+    "fluxbox": {
+      "command": [
+        "startfluxbox"
+      ],
+      "start_terminal": false
+    },
+    "openbox": {
+      "command": [
+        "openbox-session"
+      ],
+      "start_terminal": false
+    },
+    "icewm": {
+      "command": [
+        "icewm-session"
+      ],
+      "start_terminal": false
+    },
+    "jwm": {
+      "command": [
+        "jwm"
+      ],
+      "start_terminal": false
+    },
+    "fvwm3": {
+      "command": [
+        "fvwm3"
+      ],
+      "start_terminal": false
+    },
+    "fvwm": {
+      "command": [
+        "fvwm2"
+      ],
+      "start_terminal": false
+    },
+    "pekwm": {
+      "command": [
+        "pekwm"
+      ],
+      "start_terminal": false
+    },
+    "blackbox": {
+      "command": [
+        "blackbox"
+      ],
+      "start_terminal": false
+    },
+    "herbstluftwm": {
+      "command": [
+        "herbstluftwm",
+        "--locked"
+      ],
+      "start_terminal": false
+    },
+    "xmonad": {
+      "command": [
+        "xmonad-session"
+      ],
+      "start_terminal": false
+    },
+    "spectrwm": {
+      "command": [
+        "spectrwm"
+      ],
+      "start_terminal": false
+    },
+    "qtile": {
+      "command": [
+        "qtile-start"
+      ],
+      "start_terminal": false
+    },
+    "ratpoison": {
+      "command": [
+        "ratpoison"
+      ],
+      "start_terminal": false
+    },
+    "stumpwm": {
+      "command": [
+        "stumpwm"
+      ],
+      "start_terminal": false
+    },
+    "sawfish": {
+      "command": [
+        "sawfish"
+      ],
+      "start_terminal": false
+    },
+    "wmaker": {
+      "command": [
+        "wmaker"
+      ],
+      "start_terminal": false
+    },
+    "afterstep": {
+      "command": [
+        "afterstep"
+      ],
+      "start_terminal": false
+    },
+    "cwm": {
+      "command": [
+        "cwm"
+      ],
+      "start_terminal": false
+    },
+    "evilwm": {
+      "command": [
+        "evilwm"
+      ],
+      "start_terminal": false
+    },
+    "lwm": {
+      "command": [
+        "lwm"
+      ],
+      "start_terminal": true
+    },
+    "twm": {
+      "command": [
+        "twm"
+      ],
+      "start_terminal": false
+    },
+    "vtwm": {
+      "command": [
+        "vtwm"
+      ],
+      "start_terminal": false
+    },
+    "notion": {
+      "command": [
+        "notion"
+      ],
+      "start_terminal": false
+    },
+    "wm2": {
+      "command": [
+        "wm2"
+      ],
+      "start_terminal": true
+    },
+    "9wm": {
+      "command": [
+        "9wm"
+      ],
+      "start_terminal": true
+    },
+    "flwm": {
+      "command": [
+        "flwm"
+      ],
+      "start_terminal": true
+    },
+    "windowlab": {
+      "command": [
+        "windowlab"
+      ],
+      "start_terminal": true
+    },
+    "sugar": {
+      "command": [
+        "sugar"
+      ],
+      "notifications": false
+    },
+    "aewmpp": {
+      "command": [
+        "aewm++"
+      ],
+      "start_terminal": true
+    },
+    "clfswm": {
+      "command": [
+        "clfswm"
+      ],
+      "start_terminal": false
+    },
+    "ctwm": {
+      "command": [
+        "ctwm"
+      ],
+      "start_terminal": false
+    },
+    "fvwm-crystal": {
+      "command": [
+        "fvwm-crystal"
+      ],
+      "start_terminal": false
+    },
+    "miwm": {
+      "command": [
+        "miwm-session"
+      ],
+      "start_terminal": false
+    },
+    "mwm": {
+      "command": [
+        "mwm"
+      ],
+      "start_terminal": false
+    },
+    "w9wm": {
+      "command": [
+        "w9wm"
+      ],
+      "start_terminal": true
+    },
+    "ukwm": {
+      "command": [
+        "ukwm",
+        "--replace"
+      ],
+      "start_terminal": true
+    },
+    "metacity": {
+      "command": [
+        "metacity",
+        "--replace"
+      ],
+      "start_terminal": true
+    },
+    "marco": {
+      "command": [
+        "marco",
+        "--replace"
+      ],
+      "start_terminal": true
+    },
+    "muffin": {
+      "command": [
+        "muffin",
+        "--replace"
+      ],
+      "start_terminal": true
+    },
+    "kwin": {
+      "command": [
+        "kwin_x11",
+        "--replace"
+      ],
+      "start_terminal": true
+    },
+    "xfwm4": {
+      "command": [
+        "xfwm4",
+        "--replace"
+      ],
+      "start_terminal": true
+    },
+    "matchbox": {
+      "command": [
+        "matchbox-window-manager"
+      ],
+      "start_terminal": true
+    },
+    "compiz": {
+      "command": [
+        "compiz",
+        "--replace",
+        "ccp"
+      ],
+      "start_terminal": true
+    }
+  },
+  "native_seeds": {
+    "bspwm": [
+      {
+        "sources": [
+          "usr/share/doc/bspwm/examples/bspwmrc"
+        ],
+        "target": "etc/skel/.config/bspwm/bspwmrc",
+        "executable": true
+      },
+      {
+        "sources": [
+          "usr/share/doc/bspwm/examples/sxhkdrc"
+        ],
+        "target": "etc/skel/.config/sxhkd/sxhkdrc"
+      }
+    ]
+  },
+  "additional_wayland": [
+    "labwc",
+    "wayfire",
+    "weston"
+  ],
+  "native_wayland": [
+    "phosh",
+    "lomiri",
+    "budgie"
+  ],
+  "lxde_autostart": "etc/xdg/lxsession/LXDE/autostart"
+}

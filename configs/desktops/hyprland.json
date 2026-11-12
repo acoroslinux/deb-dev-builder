@@ -2,6 +2,38 @@
   "desktop": "hyprland",
   "display_manager": "sddm",
   "session_type": "wayland",
-  "supported_suites": ["trixie", "forky", "testing", "sid", "excalibur", "freia", "ceres"],
-  "packages": ["hyprland", "sddm"]
+  "supported_suites": [
+    "trixie",
+    "forky",
+    "testing",
+    "sid",
+    "excalibur",
+    "freia",
+    "ceres"
+  ],
+  "packages": [
+    "hyprland",
+    "sddm",
+    "kitty",
+    "dolphin",
+    "hyprlauncher",
+    "hyprland-guiutils",
+    "mate-polkit",
+    "dex",
+    "xdg-desktop-portal-hyprland",
+    "gnome-keyring",
+    "libpam-gnome-keyring"
+  ],
+  "distribution_overrides": {
+    "debian-13": {
+      "backports_mirror": "https://deb.debian.org/debian",
+      "backports_suite": "trixie-backports",
+      "apt_target_release": "trixie-backports"
+    },
+    "devuan-6": {
+      "backports_mirror": "https://pkgmaster.devuan.org/merged",
+      "backports_suite": "excalibur-backports",
+      "apt_target_release": "excalibur-backports"
+    }
+  }
 }

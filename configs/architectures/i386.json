@@ -1,4 +1,31 @@
 {
   "arch": "i386",
-  "dpkg_arch": "i386"
+  "dpkg_arch": "i386",
+  "aliases": [
+    "i686"
+  ],
+  "kernel_suffix": "686-pae",
+  "image": {
+    "bootable_suites": {
+      "debian": ["bookworm"],
+      "devuan": ["daedalus"]
+    },
+    "kernel_flavors": ["generic", "rt"],
+    "efi_target": "i386-efi",
+    "efi_filename": "BOOTIA32.EFI",
+    "efi_suffix": "ia32",
+    "bios": true,
+    "iso_packages": [
+      "grub-pc-bin",
+      "grub-efi-ia32-bin",
+      "isolinux",
+      "syslinux-common"
+    ],
+    "disk_grub_package": "grub-efi-ia32-bin",
+    "excluded_package_prefixes": [
+      "grub-efi-amd64",
+      "shim-signed"
+    ],
+    "compatibility_efi_architectures": []
+  }
 }

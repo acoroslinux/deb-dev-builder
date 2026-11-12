@@ -38,6 +38,7 @@ class ChrootManager:
             # A plain bind intentionally avoids importing the host's nested
             # devpts/shm/mqueue mounts into the target namespace.
             ("/dev", self.target_root / "dev", None, "--bind"),
+            ("devpts", self.target_root / "dev/pts", "devpts", "newinstance,ptmxmode=0666,mode=0620,gid=5"),
         ]
         for src, target, fstype, opts in mounts:
             target.mkdir(parents=True, exist_ok=True)
@@ -57,6 +58,8 @@ class ChrootManager:
                     raise ChrootManagerError(f"Could not bind-mount {src} at {target}: {result.stderr.strip()}")
                 continue
             cmd = ["mount", "-t", fstype]
+            if opts:
+                cmd.extend(["-o", opts])
             cmd.extend([src, str(target)])
             result = subprocess.run(cmd, check=False, stderr=subprocess.PIPE, text=True)
             if result.returncode != 0:
@@ -94,10 +97,7 @@ class ChrootManager:
             self.target_root / "proc",
         ]:
             if path.exists():
-                # /dev is mounted recursively and contains its own mounts
-                # (/dev/pts, /dev/shm, /dev/mqueue, ...).  Remove children
-                # first so validation and subsequent cleanup never see stale
-                # host mounts below the target root.
+                # Remove private child mounts, including devpts, before /dev.
                 unmount_all_under(path)
                 subprocess.run(["umount", "-l", str(path)], check=False, stderr=subprocess.DEVNULL)
         self.is_mounted = False
@@ -117,7 +117,7 @@ class ChrootManager:
             return subprocess.CompletedProcess(args=command, returncode=0, stdout="", stderr="")
 
         if self.is_mounted:
-            missing = [name for name in ("proc", "sys", "dev")
+            missing = [name for name in self.virtual_mounts
                        if not os.path.ismount(self.target_root / name)]
             if missing:
                 raise ChrootManagerError(

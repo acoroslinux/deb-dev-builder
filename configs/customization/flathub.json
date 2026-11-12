@@ -1,0 +1,5 @@
+{
+  "name": "flathub",
+  "url": "https://dl.flathub.org/repo/flathub.flatpakrepo",
+  "staged_descriptor": "etc/flatpak/remotes.d/flathub.flatpakrepo"
+}

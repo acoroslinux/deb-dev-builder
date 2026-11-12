@@ -10,6 +10,13 @@ backend downloads the official Debian OCI base image to `cache/oci/`,
 verifies every manifest and layer digest, and installs build dependencies only
 inside the isolated rootfs. It then caches the prepared build host for reuse.
 
+Restored archives are checked against the current JSON package list and the
+tools required by the selected output format. Missing dependencies are installed
+inside the isolated build host and its verified cache is refreshed before target
+bootstrap begins. For example, an older cache without `apt-utils` is upgraded
+automatically when live Debian Installer media requires `apt-ftparchive`.
+If dependencies remain unavailable, the build fails during toolchain setup.
+
 The same Debian Trixie build host is used for Debian and Devuan targets. Before
 a Devuan bootstrap, the builder installs a pinned and SHA-256-verified
 `devuan-keyring` package inside that build host; it never enables unauthenticated
@@ -27,7 +34,11 @@ Generate a portable tarball on a Debian Trixie staging machine with:
 sudo tools/create-build-host-tarball.sh cache/toolchains/build-host-amd64.tar.zst
 ```
 
-Configure its path and checksum in `configs/global_build.json` under
+Default backend, OCI identity, dependency packages and keyring pins are owned
+by `configs/toolchain/defaults.json`. Build-specific overrides remain in
+`configs/global_build.json` under `toolchain`.
+
+Configure a tarball path and checksum in `configs/global_build.json` under
 `toolchain.tarball_path` and `toolchain.tarball_sha256`, or use the equivalent
 `DEB_DEV_BUILDER_TOOLCHAIN_TARBALL` and
 `DEB_DEV_BUILDER_TOOLCHAIN_SHA256` environment variables. The builder verifies

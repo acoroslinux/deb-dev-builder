@@ -1,0 +1,172 @@
+{
+  "documents": [
+    {
+      "source": "desktops/integration.json",
+      "target": "desktop.integration"
+    },
+    {
+      "source": "customization/session-audio.json",
+      "target": "customization.session_audio"
+    },
+    {
+      "source": "customization/live-media.json",
+      "target": "customization.live_media"
+    },
+    {
+      "source": "debian-installer/autologin.json",
+      "target": "installer.autologin"
+    },
+    {
+      "source": "debian-installer/locale.json",
+      "target": "installer.locale"
+    },
+    {
+      "source": "build/installer-audit.json",
+      "target": "build.installer_audit"
+    },
+    {
+      "source": "customization/identity.json",
+      "target": "customization.identity"
+    },
+    {
+      "source": "storage/installer.json",
+      "target": "build.installer_storage"
+    },
+    {
+      "source": "build/pipeline.json",
+      "target": "build"
+    },
+    {
+      "source": "debian-installer/customization.json",
+      "target": "installer.customization"
+    },
+    {
+      "source": "customization/offline-repository.json",
+      "target": "customization.offline_repository"
+    },
+    {
+      "source": "debian-installer/media.json",
+      "target": "installer"
+    },
+    {
+      "source": "build/artifact-naming.json",
+      "target": "build.artifact_naming"
+    },
+    {
+      "source": "build/cli.json",
+      "target": "cli"
+    },
+    {
+      "source": "boot/policy.json",
+      "target": "build"
+    },
+    {
+      "source": "build/policy.json",
+      "target": "build"
+    },
+    {
+      "source": "system/defaults.json",
+      "target": "system"
+    },
+    {
+      "source": "global_build.json",
+      "target": "system",
+      "key": "system"
+    },
+    {
+      "source": "live-users/policy.json",
+      "target": "users"
+    },
+    {
+      "source": "services/policy.json",
+      "target": "services"
+    },
+    {
+      "source": "desktops/session-defaults.json",
+      "target": "desktop"
+    },
+    {
+      "source": "display-managers/sddm.json",
+      "target": "desktop.display_managers.sddm"
+    },
+    {
+      "source": "display-managers/gdm3.json",
+      "target": "desktop.display_managers.gdm3"
+    },
+    {
+      "source": "display-managers/lightdm.json",
+      "target": "desktop.display_managers.lightdm"
+    },
+    {
+      "source": "display-managers/lxdm.json",
+      "target": "desktop.display_managers.lxdm"
+    },
+    {
+      "source": "display-managers/slim.json",
+      "target": "desktop.display_managers.slim"
+    },
+    {
+      "source": "display-managers/greetd.json",
+      "target": "desktop.display_managers.greetd"
+    },
+    {
+      "source": "customization/zram.json",
+      "target": "customization.zram"
+    },
+    {
+      "source": "customization/flathub.json",
+      "target": "customization.flathub"
+    },
+    {
+      "source": "customization/samba.json",
+      "target": "customization.samba"
+    },
+    {
+      "source": "customization/plymouth.json",
+      "target": "customization.plymouth"
+    },
+    {
+      "source": "customization/grub.json",
+      "target": "customization.grub"
+    },
+    {
+      "source": "customization/branding.json",
+      "target": "customization.branding"
+    },
+    {
+      "source": "customization/polkit_files.json",
+      "target": "customization.polkit_files"
+    },
+    {
+      "source": "customization/overlay.json",
+      "target": "customization.overlay"
+    },
+    {
+      "source": "customization/artwork.json",
+      "target": "customization.artwork"
+    },
+    {
+      "source": "images/squashfs.json",
+      "target": "artifacts.squashfs"
+    },
+    {
+      "source": "images/disk.json",
+      "target": "artifacts.disk"
+    },
+    {
+      "source": "images/iso.json",
+      "target": "artifacts.iso"
+    },
+    {
+      "source": "toolchain/defaults.json",
+      "target": "toolchain"
+    },
+    {
+      "source": "customization/calamares.json",
+      "target": "customization.calamares"
+    }
+  ],
+  "architecture_profiles": "architectures",
+  "system_profiles": "system",
+  "repository_profile": "system/{distro}.json"
+}

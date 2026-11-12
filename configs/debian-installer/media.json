@@ -1,0 +1,132 @@
+{
+  "mirror": "https://deb.debian.org/debian",
+  "image_mirror": "",
+  "archive_mirror": "",
+  "bundle": {
+    "enabled": true,
+    "directory": "cache/installer-bundles/{family}/{suite}/{architecture}/{source}",
+    "download_attempts": 3,
+    "generation_attempts": 2,
+    "snapshot_offsets_hours": [0, -6, -12, -24, -48],
+    "snapshot_mirrors": {
+      "debian": ["https://snapshot.debian.org/archive/debian/{timestamp}"],
+      "devuan": []
+    }
+  },
+  "daily_images": {
+    "debian": {
+      "suites": ["testing", "forky", "sid", "unstable"],
+      "url": "https://d-i.debian.org/daily-images/{architecture}/daily",
+      "udeb_suite": "sid"
+    }
+  },
+  "default_preseed": [],
+  "init_question": "",
+  "init_ask": false,
+  "init_packages": {},
+  "target_cdrom": {
+    "enabled": false,
+    "source": "/cdrom",
+    "mount": "media/deb-dev-installer",
+    "config_file": "etc/apt/apt.conf.d/zz-deb-dev-installer-cdrom",
+    "state_directory": "var/lib/deb-dev-builder/installer-cdrom",
+    "mounts_file": "/proc/mounts",
+    "release_hook": "usr/lib/finish-install.d/14zzz-deb-dev-release-cdrom"
+  },
+  "distributions": {
+    "debian": {},
+    "devuan": {
+      "target_cdrom": {"enabled": true},
+      "image_mirror": "https://pkgmaster.devuan.org/devuan",
+      "archive_mirror": "https://pkgmaster.devuan.org/merged",
+      "cache_directory": "cache/installer/devuan/{suite}/{architecture}",
+      "release_fields": {"Origin": "Devuan", "Label": "Devuan"},
+      "live_modules": ["live-installer", "choose-init"],
+      "init_question": "choose-init/select_init",
+      "init_ask": true,
+      "init_packages": {
+        "sysvinit": ["sysvinit", "sysv-rc", "sysvinit-utils"],
+        "openrc": ["openrc"],
+        "runit": ["runit-init"]
+      },
+      "default_preseed": [
+        "d-i mirror/country string manual",
+        "d-i mirror/protocol string http",
+        "d-i mirror/http/hostname string deb.devuan.org",
+        "d-i mirror/http/directory string /merged",
+        "d-i mirror/suite string {suite}",
+        "d-i mirror/udeb/suite string {suite}"
+      ]
+    }
+  },
+  "images_path": "dists/{suite}/main/installer-{architecture}/current/images",
+  "sources": {"live": "cdrom", "netinstall": "netboot", "netboot": "netboot"},
+  "targets": {
+    "cdrom": {"kernel": "vmlinuz", "initrd": "initrd.gz", "gtk_kernel": "gtk/vmlinuz", "gtk_initrd": "gtk/initrd.gz"},
+    "netboot": {"kernel": "debian-installer/{architecture}/linux", "initrd": "debian-installer/{architecture}/initrd.gz", "gtk_kernel": "gtk/debian-installer/{architecture}/linux", "gtk_initrd": "gtk/debian-installer/{architecture}/initrd.gz"}
+  },
+  "udeb_index": "dists/{suite}/main/debian-installer/binary-{architecture}/Packages.gz",
+  "component_release_path": "dists/{suite}/{component}/binary-{architecture}/Release",
+  "deb_pool": "pool",
+  "udeb_pool": "pool-udeb",
+  "base_components": ["main"],
+  "disk_type": "live",
+  "release_fields": {
+    "Origin": "Debian",
+    "Label": "Debian",
+    "Suite": "{suite}",
+    "Codename": "{suite}",
+    "Architectures": "{architecture}",
+    "Components": "{components}"
+  },
+  "cache_directory": "cache/installer/{suite}/{architecture}",
+  "exclude_udebs": ["download-installer", "load-floppy", "iso-scan", "load-iso", "netcfg-static", "debian-edu-*", "ltsp-client-builder", "autopartkit", "simple-cdd-profiles", "lilo-installer", "elilo-installer"],
+  "live_modules": ["live-installer"],
+  "offline_package_sets": {
+    "amd64": [["grub-efi-amd64", "grub-efi-amd64-signed", "shim-signed", "efibootmgr", "os-prober"], ["grub-pc", "os-prober"]],
+    "i386": [["grub-efi-ia32", "efibootmgr", "os-prober"], ["grub-pc", "os-prober"]],
+    "arm64": [["grub-efi-arm64", "grub-efi-arm64-signed", "shim-signed", "efibootmgr", "os-prober"]],
+    "armhf": [["grub-efi-arm", "efibootmgr"]],
+    "riscv64": [["grub-efi-riscv64", "efibootmgr"]]
+  },
+  "target_root": "/target",
+  "cleanup_hook": "usr/lib/live-installer.d/99deb-dev-target-cleanup",
+  "layout_hook": "usr/lib/live-installer.d/00deb-dev-target-layout",
+  "layout_marker": "var/lib/deb-dev-builder/live-layout-ready",
+  "merged_usr_aliases": ["bin", "sbin", "lib", "lib32", "lib64", "libx32"],
+  "cleanup_marker": "var/lib/deb-dev-builder/live-user-cleaned",
+  "offline_apt_prepare_hook": "usr/lib/live-installer.d/98deb-dev-offline-apt",
+  "offline_apt_config": {
+    "path": "etc/apt/apt.conf.d/zz-deb-dev-offline-recommends",
+    "content": "APT::Install-Recommends \"false\";\nDpkg::Options { \"--force-confdef\"; \"--force-confold\"; };\n"
+  },
+  "ucf_preservation": {
+    "config_file": "etc/ucf.conf",
+    "backup_directory": "var/lib/deb-dev-builder/installer-ucf",
+    "restored_marker": "var/lib/deb-dev-builder/installer-ucf-restored",
+    "files": ["/etc/default/grub"]
+  },
+  "target_boot_hook": "usr/lib/finish-install.d/14zz-deb-dev-target-boot",
+  "offline_apt_cleanup_hook": "usr/lib/finish-install.d/15deb-dev-offline-cdrom",
+  "live_remove_paths": ["etc/initramfs-tools/conf.d/live.conf", "etc/live/config.conf.d/10-deb-dev-user.conf", "etc/default/live.conf"],
+  "live_preseed": [
+    "d-i live-installer/enable boolean true",
+    "d-i live-installer/mode select normal",
+    "d-i pkgsel/run_tasksel boolean false",
+    "d-i pkgsel/include string",
+    "d-i pkgsel/upgrade select none",
+    "d-i apt-setup/use_mirror boolean false",
+    "d-i apt-setup/cdrom/set-first boolean true",
+    "d-i apt-setup/cdrom/set-next boolean false",
+    "d-i apt-setup/disable-cdrom-entries boolean false"
+  ],
+  "download_workers": 8,
+  "download_timeout": 120,
+  "kernel_udeb_pattern": "^(?:kernel-image-|.+-modules-)(?P<release>.+)-di$",
+  "menu_labels": {"live": "Install live system", "netinstall": "Network install"},
+  "extra_boot_entries": [
+    {"id": "expert", "label": "Expert install (text)", "frontend": "text", "parameters": ["priority=low"]},
+    {"id": "rescue", "label": "Rescue an installed system (text)", "frontend": "text", "parameters": ["rescue/enable=true"]},
+    {"id": "accessible", "label": "Accessible install (graphical, high contrast)", "frontend": "gtk", "parameters": ["theme=dark"]}
+  ]
+}

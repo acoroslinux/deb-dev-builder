@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "embed_preseed": false,
+  "overlays": [
+    {"source": "configs/debian-installer/includes/gtk", "frontends": ["gtk"], "uid": 0, "gid": 0}
+  ],
+  "remove": [],
+  "patches": [],
+  "compression_level": 9,
+  "early_script_path": "usr/lib/deb-dev-installer/early-command.sh",
+  "late_script_path": "usr/lib/deb-dev-installer/late-command.sh"
+}

@@ -1,0 +1,13 @@
+{
+  "binaries": [
+    "usr/sbin/lightdm",
+    "usr/bin/lightdm"
+  ],
+  "service": "lightdm",
+  "pam_service": "lightdm-autologin",
+  "executable": "/usr/sbin/lightdm",
+  "files": {
+    "etc/lightdm/lightdm.conf": "[Seat:*]\nautologin-guest=false\nautologin-user={live_user}\nautologin-user-timeout=0\nautologin-in-background=false\nautologin-session={session}\npam-service=lightdm\npam-autologin-service=lightdm-autologin\n\n[SeatDefaults]\nautologin-guest=false\nautologin-user={live_user}\nautologin-user-timeout=0\nautologin-in-background=false\nautologin-session={session}\npam-service=lightdm\npam-autologin-service=lightdm-autologin\n",
+    "etc/lightdm/lightdm.conf.d/50-autologin.conf": "[Seat:*]\nautologin-guest=false\nautologin-user={live_user}\nautologin-user-timeout=0\nautologin-in-background=false\nautologin-session={session}\npam-service=lightdm\npam-autologin-service=lightdm-autologin\n\n[SeatDefaults]\nautologin-guest=false\nautologin-user={live_user}\nautologin-user-timeout=0\nautologin-in-background=false\nautologin-session={session}\npam-service=lightdm\npam-autologin-service=lightdm-autologin\n"
+  }
+}

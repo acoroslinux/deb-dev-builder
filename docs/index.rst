@@ -14,6 +14,12 @@ profiles. Paths are resolved independently of the shell's current directory.
    build-pipeline
    artifacts
    installers
+   live-build-reference
+   live-build-project-reference
+   live-build-applied
+   installer-flow-audit
+   desktop-validation
+   desktop-catalog
    hooks
    chroot-cleanup
    toolchain

@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "finish_hook": "usr/lib/finish-install.d/17deb-dev-locale",
+  "locale_question": "debian-installer/locale",
+  "language_question": "debian-installer/language",
+  "files": ["etc/locale.conf", "etc/default/locale"],
+  "generation_file": "etc/locale.gen",
+  "supported_file": "usr/share/i18n/SUPPORTED",
+  "builtin_locales": ["C", "C.UTF-8", "C.utf8", "POSIX"],
+  "generate_command": ["locale-gen", "--keep-existing"],
+  "update_command": ["update-locale", "--reset"],
+  "log_path": "var/log/installer/deb-dev-locale.log"
+}

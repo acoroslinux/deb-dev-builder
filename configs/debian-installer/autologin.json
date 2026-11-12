@@ -1,0 +1,22 @@
+{
+  "enabled": true,
+  "ask": true,
+  "priority": "high",
+  "default": false,
+  "owner": "deb-dev-installer",
+  "question": "deb-dev/autologin",
+  "user_question": "passwd/username",
+  "make_user_question": "passwd/make-user",
+  "minimum_uid": 1000,
+  "template_path": "usr/share/deb-dev-installer/autologin.templates",
+  "startup_hook": "usr/lib/debian-installer-startup.d/S25deb-dev-autologin",
+  "finish_hook": "usr/lib/finish-install.d/16deb-dev-autologin",
+  "load_template_command": ["debconf-loadtemplate", "--merge"],
+  "description": "Enable automatic desktop login?",
+  "details": "Log in automatically with the user created during installation. Disk encryption passwords are still required.",
+  "managers": {
+    "lightdm": {"path": "etc/lightdm/lightdm.conf.d/60-deb-dev-autologin.conf", "sections": {"Seat:*": {"autologin-user": "{user}", "autologin-user-timeout": "0", "user-session": "{session}", "autologin-session": "{session}"}}, "disable_sections": {"Seat:*": {"autologin-user": ""}}},
+    "sddm": {"path": "etc/sddm.conf.d/60-deb-dev-autologin.conf", "sections": {"Autologin": {"User": "{user}", "Session": "{session}.desktop", "Relogin": "false"}}, "disable_sections": {"Autologin": {"User": ""}}},
+    "gdm3": {"path": "etc/gdm3/daemon.conf", "sections": {"daemon": {"AutomaticLoginEnable": "true", "AutomaticLogin": "{user}"}}, "disable_sections": {"daemon": {"AutomaticLoginEnable": "false"}}}
+  }
+}

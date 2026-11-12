@@ -1,0 +1,29 @@
+{
+  "prefix": "deb-dev",
+  "template": "{prefix}-{distro}-{image_type}-{architecture}-{installer}-{desktop}-{variant}-{init_system}-{kernel}-{bootloader}-{filesystem}-{mode}-{build_id}",
+  "timestamp_format": "%Y%m%dT%H%M%SZ",
+  "defaults": {
+    "desktop": "no-desktop",
+    "variant": "default",
+    "installer": "no-installer",
+    "distro": "custom"
+  },
+  "installer_labels": {
+    "calamares": "calamares",
+    "debian_installer": "debian-installer"
+  },
+  "image_types": {
+    "iso": "{di_mode}-iso",
+    "netboot": "netboot",
+    "img": "disk-img",
+    "raw": "disk-raw",
+    "qcow2": "disk-qcow2",
+    "vmdk": "disk-vmdk",
+    "vdi": "disk-vdi",
+    "vhd": "disk-vhd",
+    "vhdx": "disk-vhdx",
+    "tarball": "rootfs",
+    "container": "container",
+    "oci": "oci"
+  }
+}

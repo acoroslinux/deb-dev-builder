@@ -1,0 +1,27 @@
+{
+  "desktop": "weston",
+  "display_manager": "sddm",
+  "session_type": "wayland",
+  "packages": [
+    "weston",
+    "sddm",
+    "foot",
+    "thunar",
+    "mate-polkit",
+    "dex",
+    "gnome-keyring",
+    "libpam-gnome-keyring",
+    "dunst"
+  ],
+  "supported_suites": [
+    "bookworm",
+    "trixie",
+    "forky",
+    "sid",
+    "daedalus",
+    "excalibur",
+    "freia",
+    "ceres",
+    "testing"
+  ]
+}

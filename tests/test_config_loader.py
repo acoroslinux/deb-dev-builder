@@ -182,3 +182,37 @@ class TestConfigLoader:
         assert config["session_type"] == "wayland"
         assert "waybar" in config["software"]
         assert "xorg" not in config["software"]
+
+
+@pytest.mark.parametrize('distro', ['devuan-5', 'devuan-6', 'debian-13'])
+def test_xfce_polkit_selection_is_specific_to_devuan(config_root, distro):
+    config = ConfigLoader(config_root).assemble_build_config(
+        config_root / 'global_build.json', architecture='amd64', distro=distro,
+        desktop='xfce', init_system='sysvinit' if distro.startswith('devuan') else 'systemd')
+    if distro.startswith('devuan'):
+        assert ('policykit-1-gnome' if distro == 'devuan-5' else 'xfce-polkit') in config['software']
+        assert {'mate-polkit', 'lxpolkit'} <= set(config['exclude_packages'])
+        assert not {'mate-polkit', 'lxpolkit'} & set(config['software'])
+    else:
+        assert 'xfce-polkit' not in config['software']
+        assert not {'mate-polkit', 'lxpolkit'} & set(config['exclude_packages'])
+    assert 'distribution_overrides' not in config
+
+
+def test_desktop_distribution_overrides_apply_family_then_release(config_root):
+    loader = ConfigLoader(config_root)
+    profile = {'packages': ['base'], 'distribution_overrides': {
+        'devuan': {'packages': ['family']},
+        'devuan-6': {'packages': ['release']},
+    }}
+    assert loader._desktop_distribution_profile(profile, 'devuan', 'devuan-6')['packages'] == ['base', 'family', 'release']
+    with pytest.raises(ConfigLoaderError, match='only accept'):
+        loader._desktop_distribution_profile({'distribution_overrides': {'devuan': {'arbitrary': []}}}, 'devuan', 'devuan-6')
+
+
+def test_devuan_mate_does_not_inherit_xfce_polkit_exclusions(config_root):
+    config = ConfigLoader(config_root).assemble_build_config(
+        config_root / 'global_build.json', architecture='amd64', distro='devuan-6',
+        desktop='mate', init_system='sysvinit')
+    assert 'xfce-polkit' not in config['software']
+    assert 'mate-polkit' not in config['exclude_packages']

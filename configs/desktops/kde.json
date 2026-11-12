@@ -11,6 +11,13 @@
     "xserver-xorg-video-vmware",
     "xserver-xorg-input-all",
     "x11-xserver-utils",
-    "dbus-x11"
+    "dbus-x11",
+    "plasma-nm",
+    "plasma-pa",
+    "powerdevil",
+    "polkit-kde-agent-1",
+    "xdg-desktop-portal-kde",
+    "konsole",
+    "dolphin"
   ]
 }

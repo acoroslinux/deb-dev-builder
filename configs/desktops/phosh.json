@@ -1,0 +1,18 @@
+{
+  "desktop": "phosh",
+  "display_manager": "sddm",
+  "session_type": "wayland",
+  "packages": [
+    "phosh-core",
+    "phosh",
+    "sddm",
+    "gnome-console"
+  ],
+  "supported_suites": [
+    "bookworm",
+    "trixie",
+    "forky",
+    "sid",
+    "testing"
+  ]
+}

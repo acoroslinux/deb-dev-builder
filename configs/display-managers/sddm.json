@@ -1,0 +1,12 @@
+{
+  "binaries": [
+    "usr/bin/sddm"
+  ],
+  "service": "sddm",
+  "pam_service": "sddm-autologin",
+  "executable": "/usr/bin/sddm",
+  "files": {
+    "etc/sddm.conf.d/autologin.conf": "[Autologin]\nUser={live_user}\nSession={session}.desktop\nRelogin=false\n\n[General]\nDisplayServer={display_server}\n",
+    "etc/sddm.conf": "[Autologin]\nUser={live_user}\nSession={session}.desktop\nRelogin=false\n\n[General]\nDisplayServer={display_server}\n"
+  }
+}

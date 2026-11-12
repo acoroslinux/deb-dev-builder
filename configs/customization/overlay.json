@@ -1,0 +1,36 @@
+{
+  "source": "configs/custom_files",
+  "destinations": {
+    "themes": "usr/share/themes",
+    "icons": "usr/share/icons",
+    "backgrounds": "usr/share/backgrounds",
+    "dconf": "etc/dconf",
+    "autostart": "etc/xdg/autostart",
+    "applications": "usr/share/applications",
+    "lightdm": "etc/lightdm",
+    "sddm": "etc/sddm",
+    "default": "etc/default",
+    "scripts": "usr/local/bin",
+    "samba": "etc/samba",
+    "sudoers.d": "etc/sudoers.d",
+    "calamares": "etc/calamares",
+    "grub": "boot/grub",
+    "desktops": "etc/skel"
+  },
+  "fallback": "usr/local/share/deb-dev-builder/custom-files",
+  "rooted_groups": [
+    "etc",
+    "usr",
+    "var",
+    "boot",
+    "home",
+    "root",
+    "opt",
+    "bin",
+    "sbin",
+    "lib",
+    "lib64"
+  ],
+  "asset_mapping": "configs/assets/theme_mapping.json",
+  "assets_directory": "configs/assets"
+}

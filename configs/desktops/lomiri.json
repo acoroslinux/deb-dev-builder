@@ -1,0 +1,17 @@
+{
+  "desktop": "lomiri",
+  "display_manager": "sddm",
+  "session_type": "wayland",
+  "packages": [
+    "lomiri-desktop-session",
+    "lomiri-filemanager-app",
+    "lomiri-polkit-agent",
+    "sddm"
+  ],
+  "supported_suites": [
+    "trixie",
+    "forky",
+    "sid",
+    "testing"
+  ]
+}

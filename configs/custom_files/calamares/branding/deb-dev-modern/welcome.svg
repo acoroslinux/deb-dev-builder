@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="280" viewBox="0 0 800 280">
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#101d34"/><stop offset="1" stop-color="#20203e"/></linearGradient>
+    <linearGradient id="line"><stop stop-color="#67e8f9"/><stop offset="1" stop-color="#b89aff"/></linearGradient>
+  </defs>
+  <rect width="800" height="280" rx="22" fill="url(#bg)"/>
+  <g fill="none" stroke="#405775" opacity=".45"><circle cx="678" cy="140" r="105"/><circle cx="678" cy="140" r="150"/><circle cx="678" cy="140" r="200"/><path d="M0 239h800M0 248h800"/></g>
+  <rect x="38" y="43" width="44" height="4" rx="2" fill="url(#line)"/>
+  <g font-family="DejaVu Sans, sans-serif">
+    <text x="38" y="87" fill="#9bb2d0" font-size="14" letter-spacing="3">DEBIAN &amp; DEVUAN GNU/LINUX</text>
+    <text x="36" y="141" fill="#f7faff" font-size="37" font-weight="bold">Your system.</text>
+    <text x="36" y="189" fill="#f7faff" font-size="37" font-weight="bold">Your way.</text>
+    <text x="38" y="226" fill="#b4c4dc" font-size="16">A familiar foundation for your next idea.</text>
+  </g>
+  <path d="M622 77h38c42 0 72 25 72 63s-30 63-72 63h-38v-88h38c19 0 32 10 32 25s-13 25-32 25h-9" fill="none" stroke="url(#line)" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="731" cy="75" r="9" fill="#67e8f9"/>
+</svg>

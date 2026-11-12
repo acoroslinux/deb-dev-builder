@@ -1,4 +1,25 @@
 {
   "arch": "armhf",
-  "dpkg_arch": "armhf"
+  "dpkg_arch": "armhf",
+  "aliases": [],
+  "kernel_suffix": "armmp",
+  "image": {
+    "efi_target": "arm-efi",
+    "efi_filename": "BOOTARM.EFI",
+    "efi_suffix": "arm",
+    "bios": false,
+    "iso_packages": [
+      "grub-efi-arm-bin"
+    ],
+    "disk_grub_package": "grub-efi-arm-bin",
+    "excluded_package_prefixes": [
+      "grub-pc",
+      "grub-efi-amd64",
+      "grub-efi-ia32",
+      "isolinux",
+      "syslinux",
+      "shim-signed"
+    ],
+    "compatibility_efi_architectures": []
+  }
 }

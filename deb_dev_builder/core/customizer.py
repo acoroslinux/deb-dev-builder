@@ -1,4 +1,5 @@
 import os
+import json
 import re
 import shutil
 import shlex
@@ -6,7 +7,21 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Any
 import logging
+from deb_dev_builder.core.runtime_config import load_runtime, live_user_settings
 from deb_dev_builder.core.chroot_manager import ChrootManager
+from .installer_lifecycle import prepare_target_script
+from .desktop_sessions import detect_session
+from .installer_crypto import keyfile_unlock_script
+from .installer_media import target_boot_hook
+from .runtime_config import installer_storage_packages
+from .installer_grub import grub_lines
+from .installer_lifecycle import target_header
+from .plymouth_theme import render_theme_script
+from .live_media import configure_live_media
+from .session_audio import configure_session_audio
+from .desktop_integration import configure_desktop_integration
+from .path_utils import rootfs_destination
+from .calamares_compat import configure_legacy_modules
 
 logger = logging.getLogger("customizer")
 
@@ -17,31 +32,21 @@ class SystemCustomizer:
         self.chroot = chroot
         self.config = config
         self.target_root = chroot.target_root
+        self.runtime = load_runtime(config)
 
     def setup_live_users(self):
         if self.chroot.mode == "mock":
             return
-        live_user_cfg = self.config.get("live_user", "liveuser")
-        if isinstance(live_user_cfg, dict):
-            live_user = live_user_cfg.get("name", "liveuser")
-            live_password = live_user_cfg.get("password")
-            cfg_groups = live_user_cfg.get("groups", [])
-        else:
-            live_user = str(live_user_cfg)
-            live_password = None
-            cfg_groups = []
+        live_user_cfg = live_user_settings(self.config, self.runtime)
+        live_user = live_user_cfg["name"]
+        live_password = live_user_cfg.get("password")
+        groups = self.config.get("live_groups", live_user_cfg["groups"])
+        user_policy = self.runtime["users"]
 
-        if not isinstance(live_user, str) or not _VALID_LOGIN_NAME.fullmatch(live_user):
+        if not isinstance(live_user, str) or live_user == "root" or not _VALID_LOGIN_NAME.fullmatch(live_user):
             raise ValueError(f"Invalid live user name: {live_user!r}")
-        if live_password is not None and (not isinstance(live_password, str) or "\n" in live_password or "\r" in live_password):
-            raise ValueError("The live user password must be a single-line string")
-
-        if "live_groups" in self.config:
-            groups = self.config["live_groups"]
-        elif isinstance(live_user_cfg, dict) and "groups" in live_user_cfg:
-            groups = cfg_groups
-        else:
-            groups = ["sudo", "audio", "video", "plugdev", "netdev", "users"]
+        if live_password is not None and (not isinstance(live_password, str) or not live_password or any(character in live_password for character in ("\n", "\r", "\0"))):
+            raise ValueError("The live user password must be a non-empty single-line string")
 
         try:
             for group in groups:
@@ -49,9 +54,9 @@ class SystemCustomizer:
                 if lookup.returncode != 0:
                     self.chroot.run_in_chroot(["groupadd", "-f", str(group)], check=False)
 
-            self.chroot.run_in_chroot(["groupadd", "-f", "nopasswdlogin"], check=False)
-            login_groups = ",".join([*groups, "nopasswdlogin"])
-            create_user = self.chroot.run_in_chroot(["useradd", "-m", "-s", "/bin/bash", "-G", login_groups, str(live_user)], check=False)
+            self.chroot.run_in_chroot(["groupadd", "-f", user_policy["autologin_group"]], check=False)
+            login_groups = ",".join([*groups, user_policy["autologin_group"]])
+            create_user = self.chroot.run_in_chroot(["useradd", "-m", "-s", user_policy["shell"], "-G", login_groups, str(live_user)], check=False)
             if create_user.returncode != 0:
                 self.chroot.run_in_chroot(["usermod", "-G", login_groups, str(live_user)], check=True)
 
@@ -71,11 +76,11 @@ class SystemCustomizer:
             logger.exception("Could not fully configure live user %s", live_user)
             raise
 
-        sudoers_file = self.target_root / "etc" / "sudoers.d" / "live_user_nopasswd"
-        if "sudo" in groups:
+        sudoers_file = self.target_root / user_policy["sudoers_path"]
+        if user_policy["admin_group"] in groups:
             sudoers_file.parent.mkdir(parents=True, exist_ok=True)
-            sudoers_file.write_text(f"{live_user} ALL=(ALL) NOPASSWD: ALL\n")
-            sudoers_file.chmod(0o440)
+            sudoers_file.write_text(user_policy["sudoers_template"].format(user=live_user))
+            sudoers_file.chmod(int(user_policy["sudoers_mode"], 8))
         else:
             sudoers_file.unlink(missing_ok=True)
 
@@ -93,8 +98,7 @@ class SystemCustomizer:
         if self.chroot.mode == "mock":
             return
         system_config = self.config.get("system", {})
-        base = self.config.get("base_distro", "debian").lower()
-        hostname = self.config.get("hostname", system_config.get("hostname", f"{base}-modern"))
+        hostname = self.config.get("hostname", system_config.get("hostname", self.runtime["system"]["hostname"]))
         etc_dir = self.target_root / "etc"
         etc_dir.mkdir(parents=True, exist_ok=True)
 
@@ -102,20 +106,16 @@ class SystemCustomizer:
             f.write(f"{hostname}\n")
 
         hosts_file = etc_dir / "hosts"
-        hosts_content = (
-            "127.0.0.1   localhost\n"
-            f"127.0.1.1   {hostname}.localdomain {hostname}\n"
-            "::1         localhost ip6-localhost ip6-loopback\n"
-        )
+        hosts_content = self.runtime["system"]["hosts_template"].format(hostname=hostname)
         hosts_file.write_text(hosts_content)
 
-        locale = self.config.get("locale", system_config.get("locale", "en_US.UTF-8"))
+        locale = self.config.get("locale", system_config.get("locale", self.runtime["system"]["locale"]))
         loc_conf = etc_dir / "default" / "locale"
         loc_conf.parent.mkdir(parents=True, exist_ok=True)
         with open(loc_conf, "w") as f:
             f.write(f"LANG={locale}\n")
 
-        timezone = self.config.get("timezone", system_config.get("timezone", "UTC"))
+        timezone = self.config.get("timezone", system_config.get("timezone", self.runtime["system"]["timezone"]))
         (etc_dir / "timezone").write_text(f"{timezone}\n")
         zoneinfo = self.target_root / "usr" / "share" / "zoneinfo" / timezone
         localtime = etc_dir / "localtime"
@@ -130,38 +130,30 @@ class SystemCustomizer:
         service_config = self.config.get("services", [])
         services_to_enable = list(service_config.get("enable", [])) if isinstance(service_config, dict) else list(service_config)
         services_to_disable = list(service_config.get("disable", [])) if isinstance(service_config, dict) else []
-        init_system = self.config.get("init_system", "systemd")
+        init_system = self.config.get("init_system", self.runtime["system"]["init_system"])
 
-        # A live desktop must not wait for a fully configured network before
-        # showing the session.  NetworkManager is still enabled; only the
-        # boot-blocking wait units are masked.
-        if self.config.get("variant") == "live" and init_system == "systemd":
-            for wait_unit in ("NetworkManager-wait-online.service", "systemd-networkd-wait-online.service"):
-                if wait_unit not in services_to_disable:
-                    services_to_disable.append(wait_unit)
-            # Winbind is only needed for an AD/domain client.  The default
-            # standalone Samba setup must not block user-session startup on
-            # NSS lookups.
-            if "winbind.service" not in services_to_disable:
-                services_to_disable.append("winbind.service")
-
-        for auto_svc in ["NetworkManager"]:
-            if auto_svc not in services_to_enable:
-                unit = self.target_root / "usr" / "lib" / "systemd" / "system" / f"{auto_svc}.service"
-                if unit.exists():
-                    services_to_enable.append(auto_svc)
-
-        # Enable network sharing/printing daemons only when their packages
-        # are present.  This keeps minimal images unchanged while making a
-        # desktop live image discoverable by Linux and Windows clients.
-        for auto_svc in ("smbd", "nmbd", "avahi-daemon", "cups", "cups-browsed"):
-            unit = self.target_root / "usr" / "lib" / "systemd" / "system" / f"{auto_svc}.service"
-            if unit.exists() and auto_svc not in services_to_enable:
+        policy = self.runtime["services"]
+        masked = []
+        if self.config.get("output_format") == "iso":
+            masked.extend(policy["iso_mask"].get(init_system, []))
+        if self.config.get("variant") == "live":
+            masked.extend(policy["live_mask"].get(init_system, []))
+        for service in masked:
+            if service not in services_to_disable:
+                services_to_disable.append(service)
+        for auto_svc in policy["auto_enable"]:
+            unit = self.target_root / "usr/lib/systemd/system" / f"{auto_svc}.service"
+            name = self._service_name(auto_svc, init_system)
+            native = (unit.exists() if init_system == "systemd" else
+                      (self.target_root / policy["runit_source"] / name).is_dir() if init_system == "runit" else
+                      (self.target_root / "etc/init.d" / name).is_file())
+            if native and auto_svc not in services_to_enable:
                 services_to_enable.append(auto_svc)
 
         display_manager = self.config.get("display_manager")
         if display_manager:
-            display_service = "gdm3" if display_manager == "gdm" else display_manager
+            manager = self.runtime["desktop"]["display_manager_aliases"].get(display_manager, display_manager)
+            display_service = self.runtime["desktop"]["display_managers"].get(manager, {}).get("service", manager)
             if display_service not in services_to_enable:
                 services_to_enable.append(display_service)
 
@@ -170,17 +162,17 @@ class SystemCustomizer:
             if init_system == "systemd":
                 command = ["systemctl", "enable", str(svc)]
             elif init_system == "openrc":
-                command = ["rc-update", "add", service_name, "default"]
+                command = ["rc-update", "add", service_name, policy["openrc_runlevel"]]
             elif init_system == "sysvinit":
                 command = ["update-rc.d", service_name, "defaults"]
             elif init_system == "s6":
                 command = ["s6-rc-bundle-update", "add", "default", str(svc)]
             elif init_system == "runit":
-                source = self.target_root / "etc" / "sv" / service_name
-                destination = self.target_root / "etc" / "service" / service_name
+                source = self.target_root / policy["runit_source"] / service_name
+                destination = self.target_root / policy["runit_target"] / service_name
                 if source.is_dir() and not destination.is_symlink():
                     destination.parent.mkdir(parents=True, exist_ok=True)
-                    destination.symlink_to(Path("..") / "sv" / service_name)
+                    destination.symlink_to(os.path.relpath(source, destination.parent))
                 continue
             else:
                 logger.warning("Unknown init system %s; cannot enable %s", init_system, svc)
@@ -194,188 +186,94 @@ class SystemCustomizer:
             if init_system == "systemd":
                 command = ["systemctl", "disable", str(svc)]
             elif init_system == "openrc":
-                command = ["rc-update", "del", service_name, "default"]
+                command = ["rc-update", "del", service_name, policy["openrc_runlevel"]]
             elif init_system == "sysvinit":
                 command = ["update-rc.d", service_name, "disable"]
             elif init_system == "runit":
-                destination = self.target_root / "etc/service" / service_name
+                destination = self.target_root / policy["runit_target"] / service_name
                 if destination.is_symlink():
                     destination.unlink()
                 continue
             else:
                 continue
             self.chroot.run_in_chroot(command, check=False)
-            if init_system == "systemd" and self.config.get("variant") == "live":
+            if init_system == "systemd" and (self.config.get("variant") == "live" or svc in masked):
                 unit_path = self.target_root / "etc" / "systemd" / "system" / str(svc)
                 if unit_path.exists() or unit_path.is_symlink():
                     unit_path.unlink()
                 unit_path.parent.mkdir(parents=True, exist_ok=True)
                 unit_path.symlink_to(Path("/dev/null"))
 
-    @staticmethod
-    def _service_name(service: str, init_system: str) -> str:
+    def _service_name(self, service: str, init_system: str) -> str:
         if init_system == "systemd":
             return service
         name = service.removesuffix(".service")
-        return {"NetworkManager": "network-manager"}.get(name, name)
+        return self.runtime["services"]["aliases"].get(name, name)
 
     def _detect_desktop_session(self) -> str:
-        session = self.config.get("desktop_session") or self.config.get("desktop")
-        if session:
-            session_lower = session.lower()
-            if session_lower in {"kde", "plasma"}:
-                return "plasma"
-            return session_lower
-        for session_dir in ["usr/share/xsessions", "usr/share/wayland-sessions"]:
-            full_dir = self.target_root / session_dir
-            if full_dir.exists():
-                for f in sorted(full_dir.glob("*.desktop")):
-                    return f.stem
-        return "xfce"
+        return detect_session(self.target_root, self.config, self.runtime)
 
     def configure_autologin(self):
         if self.chroot.mode == "mock":
             return
+        policy = self.runtime["desktop"]
+        managers = policy["display_managers"]
         dm = self.config.get("display_manager")
-        live_user = self.config.get("live_user", "liveuser")
-        if isinstance(live_user, dict):
-            live_user = live_user.get("name", "liveuser")
-
         if not dm:
-            if (self.target_root / "usr" / "bin" / "sddm").exists():
-                dm = "sddm"
-            elif (self.target_root / "usr" / "sbin" / "gdm3").exists() or (self.target_root / "usr" / "bin" / "gdm3").exists():
-                dm = "gdm3"
-            elif (self.target_root / "usr" / "sbin" / "lightdm").exists() or (self.target_root / "usr" / "bin" / "lightdm").exists():
-                dm = "lightdm"
-
-        session_name = self._detect_desktop_session()
-        # Ensure PAM autologin configuration files permit passwordless login across all display managers
-        pam_autologin_content = (
-            "#%PAM-1.0\n"
-            "auth        required    pam_permit.so\n"
-            "@include common-account\n"
-            "@include common-session\n"
-        )
-        for pam_service in [
-            "lightdm-autologin", "sddm-autologin", "gdm-autologin",
-            "lxdm-autologin",
-        ]:
-            pam_file = self.target_root / "etc" / "pam.d" / pam_service
-            pam_file.parent.mkdir(parents=True, exist_ok=True)
-            pam_file.write_text(pam_autologin_content)
-
-        # SDDM configuration
-        for sddm_rel in ["etc/sddm.conf.d/autologin.conf", "etc/sddm.conf"]:
-            sddm_conf = self.target_root / sddm_rel
-            sddm_conf.parent.mkdir(parents=True, exist_ok=True)
-            sddm_conf.write_text(
-                f"[Autologin]\nUser={live_user}\nSession={session_name}\nRelogin=false\n\n"
-                f"[General]\nDisplayServer={'wayland' if self.config.get('session_type') == 'wayland' else 'x11'}\n"
+            dm = next((name for name, spec in managers.items()
+                       if any((self.target_root / binary).exists() for binary in spec["binaries"])), None)
+        dm = policy["display_manager_aliases"].get(dm, dm)
+        context = {
+            "live_user": live_user_settings(self.config, self.runtime)["name"],
+            "session": self._detect_desktop_session(),
+            "display_server": policy["display_servers"].get(self.config.get("session_type"), policy["display_servers"]["default"]),
+        }
+        mode = int(policy["file_mode"], 8)
+        if dm in managers:
+            manager = managers[dm]
+            base_distro = self.config.get("base_distro", self.runtime["system"]["base_distro"])
+            force_live_xorg = (
+                self.config.get("with_calamares", False)
+                and self.config.get("suite") in manager.get("live_xorg_suites", {}).get(base_distro, [])
             )
-
-        # Set default-display-manager if lightdm or sddm is active
-        if dm:
-            dm_path = self.target_root / "etc" / "X11" / "default-display-manager"
-            dm_path.parent.mkdir(parents=True, exist_ok=True)
-            if dm == "sddm":
-                dm_path.write_text("/usr/bin/sddm\n")
-            elif dm == "lightdm":
-                dm_path.write_text("/usr/sbin/lightdm\n")
-            elif dm in {"gdm", "gdm3"}:
-                dm_path.write_text("/usr/sbin/gdm3\n")
-
-        # GDM / GDM3 configuration
-        gdm_content = (
-            "[daemon]\n"
-            "AutomaticLoginEnable=true\n"
-            f"AutomaticLogin={live_user}\n"
-            "TimedLoginEnable=true\n"
-            f"TimedLogin={live_user}\n"
-            "TimedLoginDelay=0\n"
-        )
-        for gdm_path in [
-            "etc/gdm/custom.conf", "etc/gdm3/custom.conf",
-            "etc/gdm/daemon.conf", "etc/gdm3/daemon.conf"
-        ]:
-            gdm_conf = self.target_root / gdm_path
-            gdm_conf.parent.mkdir(parents=True, exist_ok=True)
-            gdm_conf.write_text(gdm_content)
-
-        # LightDM configuration
-        lightdm_content = (
-            "[Seat:*]\n"
-            "autologin-guest=false\n"
-            f"autologin-user={live_user}\n"
-            "autologin-user-timeout=0\n"
-            "autologin-in-background=false\n"
-            f"autologin-session={session_name}\n"
-            "pam-service=lightdm\n"
-            "pam-autologin-service=lightdm-autologin\n"
-            "\n"
-            "[SeatDefaults]\n"
-            "autologin-guest=false\n"
-            f"autologin-user={live_user}\n"
-            "autologin-user-timeout=0\n"
-            "autologin-in-background=false\n"
-            f"autologin-session={session_name}\n"
-            "pam-service=lightdm\n"
-            "pam-autologin-service=lightdm-autologin\n"
-        )
-        for conf_rel in ["etc/lightdm/lightdm.conf", "etc/lightdm/lightdm.conf.d/50-autologin.conf"]:
-            conf_file = self.target_root / conf_rel
-            conf_file.parent.mkdir(parents=True, exist_ok=True)
-            conf_file.write_text(lightdm_content)
-
-        # LXDM configuration
-        lxdm_conf = self.target_root / "etc" / "lxdm" / "lxdm.conf"
-        if lxdm_conf.parent.exists() or (self.target_root / "usr" / "sbin" / "lxdm").exists():
-            lxdm_conf.parent.mkdir(parents=True, exist_ok=True)
-            lxdm_conf.write_text(
-                f"[base]\nautologin={live_user}\nsession={session_name}\n\n"
-                f"[server]\n[display]\n[input]\n"
-            )
-
-        # SLiM configuration
-        slim_conf = self.target_root / "etc" / "slim.conf"
-        if slim_conf.parent.exists() or (self.target_root / "usr" / "bin" / "slim").exists():
-            slim_content = (
-                f"default_user        {live_user}\n"
-                "auto_login          yes\n"
-                f"login_cmd           exec /bin/sh - ~/.xinitrc {session_name}\n"
-            )
-            slim_conf.write_text(slim_content)
-
-        # Greetd (Wayland) configuration
-        greetd_conf = self.target_root / "etc" / "greetd" / "config.toml"
-        if greetd_conf.parent.exists() or (self.target_root / "usr" / "bin" / "greetd").exists():
-            greetd_conf.parent.mkdir(parents=True, exist_ok=True)
-            greetd_conf.write_text(
-                f"[terminal]\nvt = 1\n\n"
-                f"[default_session]\ncommand = \"{session_name}\"\nuser = \"{live_user}\"\n\n"
-                f"[initial_session]\ncommand = \"{session_name}\"\nuser = \"{live_user}\"\n"
-            )
-
-        # TTY1 Console Autologin (Getty fallback for live session without DM)
-        getty_dropin = self.target_root / "etc" / "systemd" / "system" / "getty@tty1.service.d" / "autologin.conf"
-        getty_dropin.parent.mkdir(parents=True, exist_ok=True)
-        getty_dropin.write_text(
-            f"[Service]\nExecStart=\nExecStart=-/sbin/agetty -o '-p -f -- \\\\u' --noclear --autologin {live_user} %I $TERM\n"
-        )
+            # Keep the vendor's account/session policy; only fill missing PAM files.
+            if manager.get("pam_service"):
+                pam_file = self.target_root / "etc/pam.d" / manager["pam_service"]
+                if not pam_file.exists():
+                    pam_file.parent.mkdir(parents=True, exist_ok=True)
+                    pam_file.write_text(policy["pam_autologin_template"])
+                    pam_file.chmod(mode)
+            for relative, template in manager["files"].items():
+                # Daedalus live GNOME can leave XWayland clients blocked during
+                # installer startup. These live-only files are removed on install.
+                if force_live_xorg:
+                    template = template.replace("[daemon]\n", "[daemon]\nWaylandEnable=false\n", 1)
+                destination = self.target_root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(template.format_map(context))
+                destination.chmod(mode)
+            default_manager = self.target_root / policy["default_manager_file"]
+            default_manager.parent.mkdir(parents=True, exist_ok=True)
+            default_manager.write_text(manager["executable"] + "\n")
+            default_manager.chmod(mode)
+        if self.config.get("init_system", self.runtime["system"]["init_system"]) == "systemd":
+            console = policy["console_autologin"]
+            destination = self.target_root / console["path"]
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(console["content"].format_map(context))
+            destination.chmod(mode)
 
     def configure_zram(self):
         if self.chroot.mode == "mock":
             return
-        if not self.config.get("with_zram", True):
+        policy = self.runtime["customization"]["zram"]
+        if not self.config.get("with_zram", policy["enabled_by_default"]):
             return
-        if self.config.get("init_system", "systemd") == "systemd":
-            zram_conf = self.target_root / "etc" / "systemd" / "zram-generator.conf"
-            content = "[zram0]\nzram-size = ram / 2\ncompression-algorithm = zstd\n"
-        else:
-            zram_conf = self.target_root / "etc" / "default" / "zramswap"
-            content = "ALGO=zstd\nPERCENT=50\nPRIORITY=100\n"
-        zram_conf.parent.mkdir(parents=True, exist_ok=True)
-        zram_conf.write_text(content)
+        init_system = self.config.get("init_system", self.runtime["system"]["init_system"])
+        template = policy.get(init_system, policy["default"])
+        destination = self.target_root / template["path"]
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(template["content"])
 
     def configure_flathub(self):
         if self.chroot.mode == "mock":
@@ -384,92 +282,59 @@ class SystemCustomizer:
             return
         # Import the official descriptor, including its embedded signing key.
         # GPGKey in a .flatpakrepo is base64 data, not a key download URL.
-        stale = self.target_root / "etc/flatpak/remotes.d/flathub.flatpakrepo"
+        policy = self.runtime["customization"]["flathub"]
+        stale = self.target_root / policy["staged_descriptor"]
         stale.unlink(missing_ok=True)
         self.chroot.run_in_chroot([
             "flatpak", "remote-add", "--system", "--if-not-exists",
-            "flathub", "https://dl.flathub.org/repo/flathub.flatpakrepo",
+            policy["name"], policy["url"],
         ], check=True)
 
     def configure_network_sharing(self):
         """Install conservative SMB defaults for Linux/Windows interoperability."""
         if self.chroot.mode == "mock":
             return
-        samba_conf = self.target_root / "etc" / "samba" / "smb.conf"
-        if not samba_conf.parent.exists() and not (self.target_root / "usr" / "sbin" / "smbd").exists():
+        policy = self.runtime["customization"]["samba"]
+        samba_conf = self.target_root / policy["path"]
+        if not samba_conf.parent.exists() and not (self.target_root / policy["binary"]).exists():
             return
         samba_conf.parent.mkdir(parents=True, exist_ok=True)
         if samba_conf.exists() and samba_conf.stat().st_size > 0:
             return
-        samba_conf.write_text(
-            "[global]\n"
-            "   workgroup = WORKGROUP\n"
-            "   server string = Deb-Dev-Builder\n"
-            "   server role = standalone server\n"
-            "   security = user\n"
-            "   map to guest = Bad User\n"
-            "   obey pam restrictions = yes\n"
-            "   unix extensions = yes\n"
-            "   min protocol = SMB2\n"
-            "   mdns name = mdns\n"
-            "   load printers = no\n"
-            "   printing = cups\n"
-            "\n"
-            "[homes]\n"
-            "   comment = Home Directories\n"
-            "   browseable = no\n"
-            "   read only = no\n"
-            "   valid users = %S\n"
-        )
+        samba_conf.write_text(policy["content"])
 
     def configure_plymouth_theme(self):
         """Select the bundled Plymouth theme and include it in initramfs."""
         if self.chroot.mode == "mock":
             return
-        theme_dir = self.target_root / "usr/share/plymouth/themes/deb-dev-modern"
+        policy = self.runtime["customization"]["plymouth"]
+        theme_dir = self.target_root / policy["directory"]
         if not theme_dir.is_dir():
             return
-        selector = self.target_root / "usr/sbin/plymouth-set-default-theme"
+        script = self.target_root / policy["script_file"]
+        locale = self.config.get('locale', self.config.get('system', {}).get('locale', self.runtime['system']['locale']))
+        script.write_text(render_theme_script(script.read_text(), policy, locale=locale))
+        configure_live_media(self.target_root, self.runtime, locale=locale)
+        selector = self.target_root / policy["selector"]
         if selector.exists():
             result = self.chroot.run_in_chroot(
-                ["plymouth-set-default-theme", "-R", "deb-dev-modern"], check=False
+                [*policy["select_command"], "-R", policy["name"]], check=True
             )
             if result.returncode != 0:
-                logger.warning("Could not activate deb-dev-modern Plymouth theme")
+                logger.warning("Could not activate Plymouth theme %s", policy["name"])
 
     def configure_grub_theme(self):
         """Persist the bundled GRUB theme for the installed system."""
         if self.chroot.mode == "mock":
             return
-        if self.config.get("base_distro", "debian") not in {"debian", "devuan"}:
+        if self.config.get("base_distro", self.runtime["system"]["base_distro"]) not in {"debian", "devuan"}:
             return
         bootloader = self.config.get("bootloader_type") or self.config.get("bootloader", {}).get("type", "")
         if bootloader and "grub" not in str(bootloader).lower():
             return
-        theme_file = self.target_root / "boot/grub/themes/deb-dev-modern/theme.txt"
-        if not theme_file.is_file():
-            return
-        grub_defaults = self.target_root / "etc/default/grub"
-        grub_defaults.parent.mkdir(parents=True, exist_ok=True)
-        lines = grub_defaults.read_text(encoding="utf-8").splitlines() if grub_defaults.exists() else []
-        settings = {
-            "GRUB_THEME": '"/boot/grub/themes/deb-dev-modern/theme.txt"',
-            "GRUB_GFXMODE": '"auto"',
-            "GRUB_TERMINAL_OUTPUT": '"gfxterm"',
-        }
-        replaced = set()
-        output = []
-        for line in lines:
-            key = line.split("=", 1)[0].strip() if "=" in line else ""
-            if key in settings:
-                output.append(f"{key}={settings[key]}")
-                replaced.add(key)
-            else:
-                output.append(line)
-        for key, value in settings.items():
-            if key not in replaced:
-                output.append(f"{key}={value}")
-        grub_defaults.write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
+        policy = self.runtime["customization"]["grub"]
+        self.target_root.joinpath("etc").mkdir(parents=True, exist_ok=True)
+        subprocess.run(["/bin/sh"], input="\n".join([*target_header(str(self.target_root.resolve())), *grub_lines(self.runtime)]) + "\n", text=True, check=True)
 
     def prepare_lightdm_runtime(self):
         """Create runtime paths expected by LightDM in a live rootfs."""
@@ -488,137 +353,179 @@ class SystemCustomizer:
     def configure_polkit_power(self):
         if self.chroot.mode == "mock":
             return
-        polkit_dir = self.target_root / "etc" / "polkit-1" / "rules.d"
-        polkit_dir.mkdir(parents=True, exist_ok=True)
-        rule_file = polkit_dir / "10-enable-power-actions.rules"
-        rule_content = (
-            "polkit.addRule(function(action, subject) {\n"
-            "    if (action.id.indexOf('org.freedesktop.login1.') === 0 ||\n"
-            "        action.id.indexOf('org.freedesktop.upower.') === 0 ||\n"
-            "        action.id.indexOf('org.gnome.SessionManager.') === 0 ||\n"
-            "        action.id.indexOf('org.freedesktop.consolekit.') === 0) {\n"
-            "        return polkit.Result.YES;\n"
-            "    }\n"
-            "});\n"
-        )
-        with open(rule_file, "w") as f:
-            f.write(rule_content)
-
-        # Synaptic is launched through pkexec.  Live users have no password
-        # by design, so allow only this package-manager action for an active
-        # local user who is already in the administrative sudo group.
-        synaptic_rule = polkit_dir / "20-synaptic-live-user.rules"
-        synaptic_rule.write_text(
-            "polkit.addRule(function(action, subject) {\n"
-            "    if (action.id === 'com.ubuntu.pkexec.synaptic' &&\n"
-            "        subject.active && subject.local && subject.isInGroup('sudo')) {\n"
-            "        return polkit.Result.YES;\n"
-            "    }\n"
-            "});\n"
-        )
+        for relative, template in self.runtime["customization"]["polkit_files"].items():
+            destination = self.target_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(template.replace("@@ADMIN_GROUP@@", self.runtime["users"]["admin_group"]))
 
     def configure_calamares(self):
-        if self.chroot.mode == "mock":
+        if self.chroot.mode == "mock" or not self.config.get("with_calamares", False):
             return
-        if not self.config.get("with_calamares", False):
-            return
+        policy = self.runtime["customization"]["calamares"]
 
-        # 1. Polkit rule to allow launching Calamares via pkexec without password prompt
-        polkit_dir = self.target_root / "etc" / "polkit-1" / "rules.d"
-        polkit_dir.mkdir(parents=True, exist_ok=True)
-        (polkit_dir / "49-calamares.rules").write_text(
-            "/* Allow live user to launch calamares installer via pkexec without password prompt */\n"
+        if "live_remove_packages" in self.config:
+            packages_path = self.target_root / policy["packages_config"]
+            if Path(policy["packages_config"]).is_absolute() or ".." in Path(policy["packages_config"]).parts:
+                raise ValueError("Invalid Calamares package configuration path")
+            packages_path.parent.mkdir(parents=True, exist_ok=True)
+            packages_path.write_text(json.dumps({
+                "backend": policy["packages_backend"], "skip_if_no_internet": False,
+                "update_db": False, "update_system": False,
+                "operations": [{"remove": self.config["live_remove_packages"]}] if self.config["live_remove_packages"] else [],
+            }, indent=2) + "\n")
+
+        def relative_path(value):
+            path = Path(value)
+            if path.is_absolute() or ".." in path.parts or not path.parts:
+                raise ValueError(f"Installer artifact path must be relative: {value!r}")
+            return path
+
+        def target_path(key):
+            return self.target_root / relative_path(policy[key])
+
+        def write_artifact(key, content, mode=0o644):
+            destination = target_path(key)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(content, encoding="utf-8")
+            destination.chmod(mode)
+
+        display_manager = self.config.get("display_manager")
+        if display_manager:
+            manager = policy["display_manager_aliases"].get(display_manager, display_manager)
+            write_artifact("display_manager_config", json.dumps({
+                "displaymanagers": [manager], "basicSetup": False, "sysconfigSetup": False,
+            }, indent=2) + "\n")
+
+        grub_config = self.target_root / self.runtime["customization"]["grub"]["calamares_config"]
+        grub_config.parent.mkdir(parents=True, exist_ok=True)
+        grub_policy = self.runtime["customization"]["grub"]
+        defaults = dict(grub_policy["settings"])
+        # The native module owns installation-specific storage/kernel options.
+        defaults.pop("GRUB_CMDLINE_LINUX", None)
+        # grubcfg replaces the live defaults, so the installed theme must be
+        # included explicitly alongside the native module's storage options.
+        if (self.target_root / grub_policy["theme_file"]).is_file():
+            defaults[grub_policy["theme_key"]] = "/" + grub_policy["theme_file"]
+        grub_config.write_text(json.dumps({**grub_policy["calamares"], "defaults": defaults,
+                                         "kernel_params": [*grub_policy["kernel_parameters"], *grub_policy["plymouth_parameters"]]}, indent=2) + "\n")
+
+        configure_legacy_modules(self.target_root, self.runtime["build"]["installer_audit"]["module_directories"])
+
+        write_artifact("prepare_script", prepare_target_script(self.runtime).decode(), 0o755)
+        write_artifact("keyfile_script", keyfile_unlock_script(self.runtime["build"]["installer_storage"]).decode(), 0o755)
+        write_artifact("validate_script", target_boot_hook(
+            None, self.runtime["build"]["installer_storage"], installer_storage_packages(self.config, self.runtime),
+            package_operations=False, regenerate=False, failure_code=None,
+            identity=self.runtime["customization"]["identity"],
+            plymouth=self.runtime["customization"]["plymouth"],
+        ).decode(), 0o755)
+        for name in ("prepare", "keyfile", "validate"):
+            # Calamares 3.2-era builds use @@ROOT@@ while newer releases use
+            # ${ROOT}. Pass both forms; the target script selects the first
+            # non-empty expansion so the same ISO config works across versions.
+            command = shlex.quote("/" + policy[name + "_script"]) + ' "${ROOT}" "@@ROOT@@"'
+            write_artifact(name + "_config", json.dumps({
+                "dontChroot": True, "timeout": policy["validation_timeout"], "script": [command],
+            }, indent=2) + "\n")
+
+        filename = policy["launcher_filename"]
+        if not filename or Path(filename).name != filename:
+            raise ValueError("The installer launcher filename must be a basename")
+        executable = policy["executable"]
+        entry = policy["desktop_entry"].format_map(policy)
+        write_artifact("polkit_rule", (
+            "/* Permit the active local administrator to launch the installer. */\n"
             "polkit.addRule(function(action, subject) {\n"
-            "    if (!subject.local || !subject.active || !subject.isInGroup('sudo')) return;\n"
-            "    if ((action.id === 'org.freedesktop.policykit.exec' && action.lookup('program') === '/usr/bin/calamares') ||\n"
+            "    if (!subject.local || !subject.active || !subject.isInGroup("
+            + json.dumps(self.runtime["users"]["admin_group"]) + ")) return;\n"
+            "    if ((action.id === 'org.freedesktop.policykit.exec' && action.lookup('program') === "
+            + json.dumps(executable) + ") ||\n"
             "        action.id.indexOf('com.github.calamares.') === 0 ||\n"
             "        action.id.indexOf('io.calamares.') === 0) {\n"
             "        return polkit.Result.YES;\n"
             "    }\n"
             "});\n"
-        )
+        ))
+        live_user = live_user_settings(self.config, self.runtime)["name"]
+        write_artifact("removeuser_config", f"---\nusername: {live_user}\n")
+        write_artifact("application_launcher", entry, 0o755)
 
-        live_user = self.config.get("live_user", "liveuser")
-        if isinstance(live_user, dict):
-            live_user = live_user.get("name", "liveuser")
-        removeuser = self.target_root / "etc/calamares/modules/removeuser.conf"
-        removeuser.parent.mkdir(parents=True, exist_ok=True)
-        removeuser.write_text(f"---\nusername: {live_user}\n")
+        # Do not seed installer icons into accounts created by Calamares.
+        # Also migrate workdirs built before shortcuts were live-session-only.
+        skel = self.target_root / "etc/skel"
+        if skel.is_dir():
+            for old_icon in skel.rglob(filename):
+                if old_icon.is_file() or old_icon.is_symlink():
+                    old_icon.unlink()
 
-        desktop_entry = (
-            "[Desktop Entry]\n"
-            "Version=1.0\n"
-            "Type=Application\n"
-            "Name=Install System\n"
-            "Name[pt_PT]=Instalar o Sistema\n"
-            "Comment=Install system to disk\n"
-            "Comment[pt_PT]=Instalar o sistema no disco rígido\n"
-            "Exec=pkexec /usr/bin/calamares\n"
-            "Icon=system-software-install\n"
-            "Terminal=false\n"
-            "Categories=System;Qt;\n"
-            "StartupNotify=true\n"
-        )
+        live_option = next((option for option in self.runtime["artifacts"]["iso"]["required_kernel_options"]
+                            if option.startswith("boot=")), None)
+        if not live_option:
+            raise ValueError("Calamares shortcuts require a configured live boot kernel option")
+        helper = "\n".join([
+            "#!/bin/sh",
+            "# Only create shortcuts in a running live session with its installer present.",
+            f"[ -x {shlex.quote(executable)} ] || exit 0",
+            f'case " $(cat {shlex.quote(policy["cmdline_file"])} 2>/dev/null) " in',
+            f"    *{shlex.quote(' ' + live_option + ' ')}*) ;;",
+            "    *) exit 0 ;;",
+            "esac",
+            'desktop_dir=""',
+            "if command -v xdg-user-dir >/dev/null 2>&1; then",
+            '    desktop_dir=$(xdg-user-dir DESKTOP 2>/dev/null || true)',
+            "fi",
+            'if [ -z "$desktop_dir" ] || [ "$desktop_dir" = "$HOME" ]; then',
+            '    desktop_dir="$HOME"/' + shlex.quote(policy["desktop_directory_fallback"]),
+            "fi",
+            'mkdir -p "$desktop_dir"',
+            'icon_path="$desktop_dir"/' + shlex.quote(filename),
+            "printf '%s' " + shlex.quote(entry) + ' > "$icon_path"',
+            'chmod +x "$icon_path"',
+            "if command -v gio >/dev/null 2>&1; then",
+            '    gio set --type=string "$icon_path" metadata::trusted true 2>/dev/null',
+            "    if command -v sha256sum >/dev/null 2>&1; then",
+            '        checksum=$(sha256sum "$icon_path" | cut -d\' \' -f1)',
+            '        gio set --type=string "$icon_path" metadata::xfce-exe-checksum "$checksum" 2>/dev/null',
+            "    fi",
+            "fi",
+            'touch "$icon_path"',
+            "",
+        ])
+        write_artifact("helper_script", helper, 0o755)
+        write_artifact("autostart_launcher", policy["autostart_entry"].format_map(policy))
 
-        # 2. Add launcher to /usr/share/applications/
-        apps_dir = self.target_root / "usr" / "share" / "applications"
-        apps_dir.mkdir(parents=True, exist_ok=True)
-        app_desktop = apps_dir / "install-system.desktop"
-        app_desktop.write_text(desktop_entry)
-        app_desktop.chmod(0o755)
+        # The live account is removed by Calamares before creating target users.
+        # Prepare only that account; the guarded helper handles localized Desktop paths.
+        home = self.target_root / "home" / live_user
+        if home.is_dir():
+            icon = home / relative_path(policy["desktop_directory_fallback"]) / filename
+            icon.parent.mkdir(parents=True, exist_ok=True)
+            icon.write_text(entry, encoding="utf-8")
+            icon.chmod(0o755)
 
-        # 3. Add desktop launcher for new users (/etc/skel/Desktop)
-        skel_desktop = self.target_root / "etc" / "skel" / "Desktop" / "install-deb-dev.desktop"
-        skel_desktop.parent.mkdir(parents=True, exist_ok=True)
-        skel_desktop.write_text(desktop_entry)
-        skel_desktop.chmod(0o755)
+        # shellprocess runs in the live environment with every path rooted in
+        # Calamares' installed target. Never remove anything from the live root.
+        def rooted(value):
+            return '"$target_root"/' + shlex.quote(str(relative_path(value)))
 
-        # 4. Helper script to create and trust desktop icon on live session login
-        script_path = self.target_root / "usr" / "local" / "bin" / "add-installer-desktop-icon.sh"
-        script_path.parent.mkdir(parents=True, exist_ok=True)
-        script_content = (
-            "#!/bin/sh\n"
-            "desktop_dir=\"$HOME/Desktop\"\n"
-            "mkdir -p \"$desktop_dir\"\n"
-            "icon_path=\"$desktop_dir/install-deb-dev.desktop\"\n"
-            "cat << 'EOF' > \"$icon_path\"\n"
-            f"{desktop_entry}"
-            "EOF\n"
-            "chmod +x \"$icon_path\"\n"
-            "if command -v gio >/dev/null 2>&1; then\n"
-            "    gio set --type=string \"$icon_path\" metadata::trusted true 2>/dev/null\n"
-            "    if command -v sha256sum >/dev/null 2>&1; then\n"
-            "        checksum=$(sha256sum \"$icon_path\" | cut -d' ' -f1)\n"
-            "        gio set --type=string \"$icon_path\" metadata::xfce-exe-checksum \"$checksum\" 2>/dev/null\n"
-            "    fi\n"
-            "fi\n"
-            "touch \"$icon_path\"\n"
-        )
-        script_path.write_text(script_content)
-        script_path.chmod(0o755)
+        # Each shellprocess command runs in a fresh shell. Resolve either
+        # Calamares root placeholder in every command, then guard the target.
+        def with_root(command):
+            return ('target_root="${ROOT}"; [ -n "$target_root" ] || target_root="@@ROOT@@"; '
+                    'test -n "$target_root" && test "$target_root" != / && '
+                    'test -d "$target_root/etc" && ' + command)
 
-        # 5. Autostart desktop entry (/etc/xdg/autostart/)
-        autostart_dir = self.target_root / "etc" / "xdg" / "autostart"
-        autostart_dir.mkdir(parents=True, exist_ok=True)
-        (autostart_dir / "create-install-icon.desktop").write_text(
-            "[Desktop Entry]\n"
-            "Type=Application\n"
-            "Name=Create Install Icon\n"
-            "Exec=/usr/local/bin/add-installer-desktop-icon.sh\n"
-            "Icon=system-software-install\n"
-            "Terminal=false\n"
-            "NoDisplay=true\n"
-        )
-
-        # 6. Add desktop launcher for existing home directories
-        home_dir = self.target_root / "home"
-        if home_dir.exists():
-            for user_dir in home_dir.iterdir():
-                if user_dir.is_dir():
-                    user_desktop = user_dir / "Desktop" / "install-deb-dev.desktop"
-                    user_desktop.parent.mkdir(parents=True, exist_ok=True)
-                    user_desktop.write_text(desktop_entry)
-                    user_desktop.chmod(0o755)
+        commands = []
+        artifacts = [policy[key] for key in ("autostart_launcher", "helper_script", "application_launcher", "polkit_rule",
+                                             "prepare_script", "keyfile_script", "validate_script")]
+        artifacts.append(self.runtime["customization"]["offline_repository"]["source_file"])
+        commands.append(with_root("rm -f -- " + " ".join(rooted(path) for path in artifacts)))
+        for search_root in policy["cleanup_search_roots"]:
+            path = rooted(search_root)
+            commands.append(with_root(f"if [ -d {path} ]; then find {path} -type f -name {shlex.quote(filename)} -delete; fi"))
+        cleanup = {"dontChroot": True, "timeout": policy["cleanup_timeout"],
+                   "i18n": policy["cleanup_i18n"], "script": commands}
+        write_artifact("cleanup_config", json.dumps(cleanup, indent=2, ensure_ascii=False) + "\n")
 
     def configure_branding(self):
         if self.chroot.mode == "mock":
@@ -626,24 +533,14 @@ class SystemCustomizer:
         etc_dir = self.target_root / "etc"
         etc_dir.mkdir(parents=True, exist_ok=True)
 
-        base_distro = self.config.get("base_distro", "debian").capitalize()
-        pretty_name = f"{base_distro} Modern GNU/Linux"
+        policy = self.runtime["customization"]["branding"]
+        base_name = self.config.get("base_distro", self.runtime["system"]["base_distro"]).capitalize()
+        context = {"base_name": base_name, "base_id": base_name.lower()}
+        context["pretty_name"] = policy["pretty_name"].format_map(context)
         os_release = etc_dir / "os-release"
         if not os_release.exists():
-            os_release.write_text(
-                f'NAME="{base_distro} Modern"\n'
-                f'ID="{base_distro.lower()}_modern"\n'
-                f'ID_LIKE="{base_distro.lower()}"\n'
-                f'PRETTY_NAME="{pretty_name}"\n'
-                'VERSION="2026.08"\n'
-                'VERSION_ID="2026.08"\n'
-                'HOME_URL="https://github.com/acoroslinux/deb-dev-builder"\n'
-                'SUPPORT_URL="https://github.com/acoroslinux/deb-dev-builder"\n'
-                'BUG_REPORT_URL="https://github.com/acoroslinux/deb-dev-builder"\n'
-            )
-
-        issue_file = etc_dir / "issue"
-        issue_file.write_text(f"{pretty_name} \\r (\\l)\n\n")
+            os_release.write_text(policy["os_release"].format_map(context))
+        (etc_dir / "issue").write_text(policy["issue"].format_map(context))
 
     def configure_machine_id(self):
         if self.chroot.mode == "mock":
@@ -653,12 +550,13 @@ class SystemCustomizer:
         # systemd reads an empty /etc/machine-id and creates a transient one in
         # /run/machine-id without trying to commit it to disk — committing to a
         # read-only rootfs would crash systemd (exit code 1 / Kernel Panic).
-        m_id = self.target_root / "etc" / "machine-id"
+        identity = self.runtime["customization"]["identity"]
+        m_id = self.target_root / identity["machine_id"]
         m_id.parent.mkdir(parents=True, exist_ok=True)
         m_id.write_text("")  # empty → uninitialized; systemd generates transient ID
 
         # /var/lib/dbus/machine-id should symlink to /etc/machine-id
-        dbus_id = self.target_root / "var" / "lib" / "dbus" / "machine-id"
+        dbus_id = self.target_root / identity["dbus_id"]
         dbus_id.parent.mkdir(parents=True, exist_ok=True)
         if dbus_id.exists() or dbus_id.is_symlink():
             try:
@@ -666,15 +564,15 @@ class SystemCustomizer:
             except Exception:
                 pass
         try:
-            dbus_id.symlink_to(Path("/etc/machine-id"))
+            dbus_id.symlink_to(identity["dbus_target"])
         except Exception:
             pass
 
         # Disable systemd-machine-id-commit so it never tries to write to the
         # read-only squashfs-backed /etc
-        masked_dir = self.target_root / "etc" / "systemd" / "system"
+        commit_mask = self.target_root / identity["commit_mask"]
+        masked_dir = commit_mask.parent
         masked_dir.mkdir(parents=True, exist_ok=True)
-        commit_mask = masked_dir / "systemd-machine-id-commit.service"
         if not commit_mask.exists():
             try:
                 commit_mask.symlink_to("/dev/null")
@@ -710,9 +608,12 @@ class SystemCustomizer:
                 except Exception:
                     pass
 
-        conf_dir = self.target_root / "etc" / "initramfs-tools" / "conf.d"
-        conf_dir.mkdir(parents=True, exist_ok=True)
-        (conf_dir / "live.conf").write_text("BOOT=live\n")
+        # The ISO selects live boot through its kernel command line. Persisting
+        # BOOT=live here survives Calamares' removal of live-boot, leaving the
+        # installed initramfs sourcing a missing /scripts/live and exiting PID 1.
+        # Also remove the override when reusing an older builder rootfs.
+        live_boot_override = self.target_root / "etc/initramfs-tools/conf.d/live.conf"
+        live_boot_override.unlink(missing_ok=True)
 
         if (self.target_root / "usr" / "sbin" / "update-initramfs").exists():
             try:
@@ -760,6 +661,9 @@ class SystemCustomizer:
         # Install skel files and theme assets before creating users and
         # selecting themes. Runtime settings must use the selected profiles.
         self.copy_custom_files()
+        if self.chroot.mode != 'mock':
+            configure_session_audio(self.target_root, self.runtime, self.config.get('init_system', self.runtime['system']['init_system']))
+            configure_desktop_integration(self.target_root, self.config, self.runtime)
         self.setup_live_users()
         self.configure_system_defaults()
         self.configure_dbus_launch()
@@ -781,24 +685,24 @@ class SystemCustomizer:
         self.fix_home_permissions()
 
     def configure_offline_repository(self):
-        """Configure /etc/apt/sources.list.d/offline-iso.list pointing to the ISO offline repository."""
+        """Configure the live session's local APT source from its JSON policy."""
         if self.chroot.mode == "mock":
             return
-        sources_d = self.target_root / "etc" / "apt" / "sources.list.d"
-        sources_d.mkdir(parents=True, exist_ok=True)
-        repo_content = (
-            "# Offline Debian/Devuan Live ISO Repository\n"
-            "deb [trusted=yes] file:/run/live/medium/repo/ ./\n"
-        )
-        (sources_d / "offline-iso.list").write_text(repo_content)
-        logger.info("Configured Debian offline ISO repository in /etc/apt/sources.list.d/offline-iso.list")
+        policy = self.runtime["customization"]["offline_repository"]
+        relative = Path(policy["source_file"])
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("Invalid offline repository source path")
+        source = self.target_root / relative
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(policy["entry_template"].format(uri=policy["live_uri"]))
+        logger.info("Configured live offline repository at %s", source)
 
     def configure_locales(self):
         if self.chroot.mode == "mock":
             return
         system_config = self.config.get("system", {})
-        locale = self.config.get("locale", system_config.get("locale", "en_US.UTF-8"))
-        locales = list(dict.fromkeys([locale, "en_US.UTF-8"]))
+        locale = self.config.get("locale", system_config.get("locale", self.runtime["system"]["locale"]))
+        locales = list(dict.fromkeys([locale, *self.runtime["system"]["fallback_locales"]]))
         logger.info("🌐 Configuring locales: %s", ", ".join(locales))
         try:
             self.chroot.run_in_chroot(["apt-get", "install", "-y", "locales"], check=False)
@@ -836,8 +740,8 @@ class SystemCustomizer:
             except ImportError:
                 def resolve_from_project(p): return Path(p)
             
-        mapping_file = resolve_from_project("configs/assets/theme_mapping.json")
-        assets_dir = resolve_from_project("configs/assets")
+        mapping_file = resolve_from_project(self.runtime["customization"]["overlay"]["asset_mapping"])
+        assets_dir = resolve_from_project(self.runtime["customization"]["overlay"]["assets_directory"])
         
         if not mapping_file.exists():
             return
@@ -850,14 +754,20 @@ class SystemCustomizer:
                 src = assets_dir / asset_name
                 if src.exists():
                     for target in paths:
-                        target_path = chroot.target_root / target.lstrip('/')
+                        relative = Path(target.lstrip('/'))
+                        if '..' in relative.parts:
+                            raise ValueError(f"Unsafe theme asset destination: {target}")
+                        signature = src.read_bytes()[:8]
+                        suffix = relative.suffix.lower()
+                        if suffix == '.png' and signature != b'\x89PNG\r\n\x1a\n':
+                            raise ValueError(f"Theme asset {src} is not PNG but destination {target} requires PNG")
+                        if suffix in ('.jpg', '.jpeg') and not signature.startswith(b'\xff\xd8\xff'):
+                            raise ValueError(f"Theme asset {src} is not JPEG but destination {target} requires JPEG")
+                        target_path = chroot.target_root / relative
                         target_path.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(src, target_path)
         except Exception as e:
-            if 'logger' in globals():
-                logger.error(f"Failed to apply theme assets: {e}")
-            else:
-                print(f"Failed to apply theme assets: {e}")
+            raise ValueError(f"Failed to apply theme assets: {e}") from e
 
     def copy_custom_files(self):
         """
@@ -868,7 +778,8 @@ class SystemCustomizer:
 
         from deb_dev_builder.core.path_utils import resolve_from_project
         project_root = resolve_from_project("")
-        custom_files_dir = project_root / "configs" / "custom_files"
+        overlay = self.runtime["customization"]["overlay"]
+        custom_files_dir = project_root / overlay["source"]
 
         if custom_files_dir.exists() and custom_files_dir.is_dir():
             # ``custom_files`` is a semantic overlay, not a raw copy into the
@@ -876,23 +787,7 @@ class SystemCustomizer:
             # rooted, and map project-specific asset groups to their package
             # locations. Unknown groups are kept under /usr/local/share so a
             # typo can never create an unexpected /<name> directory.
-            destination_prefixes = {
-                "themes": Path("usr/share/themes"),
-                "icons": Path("usr/share/icons"),
-                "backgrounds": Path("usr/share/backgrounds"),
-                "dconf": Path("etc/dconf"),
-                "autostart": Path("etc/xdg/autostart"),
-                "applications": Path("usr/share/applications"),
-                "lightdm": Path("etc/lightdm"),
-                "sddm": Path("etc/sddm"),
-                "default": Path("etc/default"),
-                "scripts": Path("usr/local/bin"),
-                "samba": Path("etc/samba"),
-                "sudoers.d": Path("etc/sudoers.d"),
-                "calamares": Path("etc/calamares"),
-                "grub": Path("boot/grub"),
-                "desktops": Path("etc/skel"),
-            }
+            destination_prefixes = {name: Path(destination) for name, destination in overlay["destinations"].items()}
 
             for source in custom_files_dir.rglob("*"):
                 if not source.is_file() or source.name == ".gitkeep":
@@ -901,7 +796,7 @@ class SystemCustomizer:
                 group = relative.parts[0]
                 if group == "calamares" and len(relative.parts) > 2 and relative.parts[1] in {"systemd", "non-systemd"}:
                     selector = relative.parts[1]
-                    init_system = str(self.config.get("init_system", "systemd")).lower()
+                    init_system = str(self.config.get("init_system", self.runtime["system"]["init_system"])).lower()
                     if (selector == "systemd") != (init_system == "systemd"):
                         continue
                     relative = Path("calamares") / Path(*relative.parts[2:])
@@ -912,13 +807,15 @@ class SystemCustomizer:
                         destination = Path("usr/share/plymouth") / Path(*relative.parts[1:])
                     else:
                         destination = Path("usr/share/plymouth") / Path(*relative.parts[1:])
-                elif group in {"etc", "usr", "var", "boot", "home", "root", "opt", "bin", "sbin", "lib", "lib64"}:
+                elif group in overlay["rooted_groups"]:
                     destination = relative
                 elif group in destination_prefixes:
                     destination = destination_prefixes[group] / Path(*relative.parts[1:])
                 else:
-                    destination = Path("usr/local/share/deb-dev-builder/custom-files") / relative
-                dest_path = self.target_root / destination
+                    destination = Path(overlay["fallback"]) / relative
+                dest_path = rootfs_destination(self.target_root, destination)
+                if dest_path.is_symlink():
+                    dest_path.unlink()
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, dest_path)
 
@@ -944,7 +841,9 @@ class SystemCustomizer:
             src_path = custom_files_dir / src_rel
             if not src_path.exists():
                 src_path = project_root / src_rel
-            dest_path = self.target_root / dest_rel.lstrip("/")
+            dest_path = rootfs_destination(self.target_root, dest_rel.lstrip('/'))
+            if dest_path.is_symlink():
+                dest_path.unlink()
 
             if not src_path.exists():
                 continue
@@ -969,36 +868,52 @@ class SystemCustomizer:
         """Install custom Debian & Devuan Modern artwork."""
         if self.chroot.mode == "mock":
             return
-        bg_dir = self.target_root / "usr" / "share" / "backgrounds"
+        policy = self.runtime["customization"]["artwork"]
+        bg_dir = self.target_root / policy["directory"]
         bg_dir.mkdir(parents=True, exist_ok=True)
         from deb_dev_builder.core.path_utils import resolve_from_project
-        artwork_src = resolve_from_project("artwork/wallpapers/deb-dev-modern.jpg")
+        artwork_src = resolve_from_project(policy["source"])
         if artwork_src.exists():
-            shutil.copy2(artwork_src, bg_dir / "deb-dev-modern.jpg")
+            shutil.copy2(artwork_src, bg_dir / policy["filename"])
 
-            default_wp = bg_dir / "default-wallpaper.png"
+            default_wp = bg_dir / policy["default_link"]
             if default_wp.exists() or default_wp.is_symlink():
                 default_wp.unlink()
-            default_wp.symlink_to(Path("/usr/share/backgrounds/deb-dev-modern.jpg"))
+            default_wp.symlink_to(Path("/") / policy["directory"] / policy["filename"])
+
+        compat = policy["xfce_default_backdrop"]
+        if self.config.get("desktop") == "xfce" and self.config.get("distro") in compat["distributions"]:
+            # Ceres carries xfdesktop's Debian fallback path without the
+            # matching desktop-base file. Retain the distribution's image.
+            destination = rootfs_destination(self.target_root, compat["path"])
+            if rootfs_destination(self.target_root, compat["path"], follow_leaf=True).is_file():
+                return
+            image = rootfs_destination(self.target_root, compat["image"], follow_leaf=True)
+            if not image.is_file():
+                raise ValueError('The XFCE default backdrop requires an installed distribution wallpaper')
+            if destination.is_symlink():
+                destination.unlink()
+            elif destination.exists():
+                raise ValueError('The XFCE default backdrop path must be a file or symlink')
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.symlink_to('/' + compat["image"])
 
     def fix_home_permissions(self):
         if self.chroot.mode == "mock":
             return
-        live_user = self.config.get("live_user", "liveuser")
-        if isinstance(live_user, dict):
-            live_user = live_user.get("name", "liveuser")
+        live_user = live_user_settings(self.config, self.runtime)["name"]
 
         home_dir = self.target_root / "home" / live_user
         if home_dir.exists():
             try:
                 self.chroot.run_in_chroot(["chown", "-R", f"{live_user}:{live_user}", f"/home/{live_user}"], check=False)
-                self.chroot.run_in_chroot(["chmod", "755", f"/home/{live_user}"], check=False)
+                self.chroot.run_in_chroot(["chmod", self.runtime["users"]["home_mode"], f"/home/{live_user}"], check=False)
             except Exception as e:
                 logger.warning(f"Could not fix permissions on /home/{live_user}: {e}")
 
         # Ensure sticky bit on /tmp and /var/tmp
-        for tmp_path in ["/tmp", "/var/tmp"]:
+        for tmp_path in self.runtime["users"]["temporary_paths"]:
             try:
-                self.chroot.run_in_chroot(["chmod", "1777", tmp_path], check=False)
+                self.chroot.run_in_chroot(["chmod", self.runtime["users"]["temporary_mode"], tmp_path], check=False)
             except Exception:
                 pass

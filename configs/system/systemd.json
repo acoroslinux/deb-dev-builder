@@ -1,4 +1,11 @@
 {
   "init_system": "systemd",
-  "packages": ["systemd", "systemd-sysv"]
+  "packages": [
+    "systemd",
+    "systemd-sysv",
+    "libpam-systemd",
+    "dbus-user-session"
+  ],
+  "live_config_package": "live-config-systemd",
+  "zram_package": "systemd-zram-generator"
 }

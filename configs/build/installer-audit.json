@@ -1,0 +1,126 @@
+{
+  "enabled": true,
+  "report_path": "var/lib/deb-dev-builder/installer-audit.json",
+  "require_empty_machine_id": true,
+  "settings_path": "etc/calamares/settings.conf",
+  "config_directory": "etc/calamares/modules",
+  "branding_directory": "etc/calamares/branding",
+  "branding_required_images": [
+    "productLogo",
+    "productIcon",
+    "productWelcome"
+  ],
+  "branding_required_files": [
+    "show.qml",
+    "FeatureSlide.qml",
+    "stylesheet.qss"
+  ],
+  "module_directories": [
+    "usr/lib/calamares/modules",
+    "usr/lib/*/calamares/modules"
+  ],
+  "filesystem_tools": {
+    "ext4": "usr/sbin/mkfs.ext4",
+    "btrfs": "usr/sbin/mkfs.btrfs",
+    "xfs": "usr/sbin/mkfs.xfs",
+    "f2fs": "usr/sbin/mkfs.f2fs"
+  },
+  "required_jobs": [
+    "partition",
+    "mount",
+    "unpackfs",
+    "shellprocess@prepare-install-target",
+    "machineid",
+    "fstab",
+    "removeuser",
+    "users",
+    "displaymanager",
+    "packages",
+    "initramfs",
+    "grubcfg",
+    "bootloader",
+    "shellprocess@validate-installed-boot",
+    "shellprocess@cleanup-live-installer",
+    "umount",
+    "luksbootkeyfile",
+    "shellprocess@configure-encrypted-unlock"
+  ],
+  "before": [
+    [
+      "partition",
+      "mount"
+    ],
+    [
+      "mount",
+      "unpackfs"
+    ],
+    [
+      "unpackfs",
+      "shellprocess@prepare-install-target"
+    ],
+    [
+      "shellprocess@prepare-install-target",
+      "machineid"
+    ],
+    [
+      "shellprocess@prepare-install-target",
+      "displaymanager"
+    ],
+    [
+      "fstab",
+      "initramfscfg"
+    ],
+    [
+      "removeuser",
+      "users"
+    ],
+    [
+      "users",
+      "displaymanager"
+    ],
+    [
+      "packages",
+      "initramfscfg"
+    ],
+    [
+      "initramfscfg",
+      "initramfs"
+    ],
+    [
+      "initramfs",
+      "grubcfg"
+    ],
+    [
+      "grubcfg",
+      "bootloader"
+    ],
+    [
+      "bootloader",
+      "shellprocess@validate-installed-boot"
+    ],
+    [
+      "shellprocess@validate-installed-boot",
+      "shellprocess@cleanup-live-installer"
+    ],
+    [
+      "shellprocess@cleanup-live-installer",
+      "umount"
+    ],
+    [
+      "unpackfs",
+      "luksbootkeyfile"
+    ],
+    [
+      "luksbootkeyfile",
+      "fstab"
+    ],
+    [
+      "fstab",
+      "shellprocess@configure-encrypted-unlock"
+    ],
+    [
+      "shellprocess@configure-encrypted-unlock",
+      "initramfs"
+    ]
+  ]
+}

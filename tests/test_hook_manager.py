@@ -150,3 +150,49 @@ def test_safe_remove_tree_is_limited_to_an_explicit_root(tmp_path):
     assert not target.exists()
     with pytest.raises(ValueError, match="outside"):
         safe_remove_tree(tmp_path / "other", allowed_root=allowed)
+
+
+@pytest.mark.parametrize("directory", ["pre-bootstrap.d", "chroot/post-packages.d"])
+def test_old_or_nested_hook_layout_is_rejected_before_any_script_runs(tmp_path, directory):
+    runner = manager(tmp_path)
+    marker = tmp_path / "executed"
+    write_hook(runner.hooks_base / "pre-chroot/10-valid.sh", f'touch "{marker}"\n')
+    write_hook(runner.hooks_base / directory / "20-hidden-by-old-layout.sh")
+    with pytest.raises(HookError, match="Use only pre-chroot, chroot, post-chroot"):
+        runner.run_stage("pre-chroot")
+    assert not marker.exists()
+
+
+def test_disabled_hooks_do_not_validate_unused_directories(tmp_path):
+    runner = manager(tmp_path, enabled=False)
+    write_hook(runner.hooks_base / "other-stage/10-unused.sh")
+    runner.run_stage("pre-chroot")
+
+
+def test_repository_has_no_second_hook_tree():
+    assert not resolve_from_project("hooks").exists()
+
+
+def test_bundled_post_hook_verifies_only_current_artifact_with_custom_path(tmp_path, capfd):
+    runner = manager(tmp_path)
+    runner.hooks_base = resolve_from_project("configs/hooks")
+    artifact = tmp_path / "custom output/current.iso"
+    artifact.parent.mkdir()
+    artifact.write_bytes(b"current build")
+    (artifact.parent / "previous.iso").touch()
+    runner.run_stage("post-chroot", artifact=artifact)
+    output = capfd.readouterr().out
+    assert str(artifact) in output
+    assert "previous.iso" not in output
+    assert "Scanning" not in output
+
+
+@pytest.mark.parametrize("exists", [False, True])
+def test_bundled_post_hook_rejects_missing_or_empty_current_artifact(tmp_path, exists):
+    runner = manager(tmp_path)
+    runner.hooks_base = resolve_from_project("configs/hooks")
+    artifact = tmp_path / "invalid.iso"
+    if exists:
+        artifact.touch()
+    with pytest.raises(HookError, match="post-chroot"):
+        runner.run_stage("post-chroot", artifact=artifact)

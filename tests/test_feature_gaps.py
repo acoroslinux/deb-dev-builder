@@ -49,11 +49,11 @@ def test_autologin_preserves_interactive_pam_authentication(tmp_path):
     normal = tmp_path / "etc/pam.d/lightdm"
     normal.parent.mkdir(parents=True)
     normal.write_text("@include common-auth\n")
-    customizer = SystemCustomizer(RecordingChroot(tmp_path), {"session_type": "wayland"})
+    customizer = SystemCustomizer(RecordingChroot(tmp_path), {"display_manager": "lightdm", "session_type": "wayland"})
     customizer.configure_autologin()
     assert normal.read_text() == "@include common-auth\n"
     assert "common-session" in (normal.parent / "lightdm-autologin").read_text()
-    assert "DisplayServer=wayland" in (tmp_path / "etc/sddm.conf").read_text()
+    assert not (tmp_path / "etc/sddm.conf").exists()
     assert "pam-service=lightdm\n" in (tmp_path / "etc/lightdm/lightdm.conf").read_text()
 
 
@@ -81,13 +81,26 @@ def test_runit_can_disable_previously_enabled_services(tmp_path):
     assert not link.is_symlink()
 
 
+def test_minimal_iso_masks_interactive_firstboot_without_masking_disk_setup(tmp_path):
+    for output_format in ("iso", "img"):
+        root = tmp_path / output_format
+        SystemCustomizer(RecordingChroot(root), {
+            "init_system": "systemd", "output_format": output_format, "variant": "minimal",
+        }).setup_services()
+        firstboot = root / "etc/systemd/system/systemd-firstboot.service"
+        if output_format == "iso":
+            assert firstboot.is_symlink() and firstboot.readlink() == Path("/dev/null")
+        else:
+            assert not firstboot.is_symlink()
+
+
 def test_theme_and_icon_overlays_install_to_standard_locations(tmp_path, monkeypatch):
     source = tmp_path / "project/configs/custom_files"
     for name in ("themes/demo/gtk.css", "icons/demo/index.theme"):
         asset = source / name
         asset.parent.mkdir(parents=True)
         asset.write_text("asset")
-    monkeypatch.setattr("deb_dev_builder.core.path_utils.resolve_from_project", lambda _: tmp_path / "project")
+    monkeypatch.setattr("deb_dev_builder.core.path_utils.resolve_from_project", lambda relative: tmp_path / "project" / relative)
     SystemCustomizer(RecordingChroot(tmp_path / "root"), {}).copy_custom_files()
     assert (tmp_path / "root/usr/share/themes/demo/gtk.css").read_text() == "asset"
     assert (tmp_path / "root/usr/share/icons/demo/index.theme").is_file()
@@ -107,7 +120,7 @@ def test_calamares_removes_selected_live_user_and_limits_privileges(tmp_path):
         "with_calamares": True, "live_user": {"name": "demo"},
     }).configure_calamares()
     assert "username: demo" in (tmp_path / "etc/calamares/modules/removeuser.conf").read_text()
-    assert "subject.isInGroup('sudo')" in (tmp_path / "etc/polkit-1/rules.d/49-calamares.rules").read_text()
+    assert 'subject.isInGroup("sudo")' in (tmp_path / "etc/polkit-1/rules.d/49-calamares.rules").read_text()
 
 
 @pytest.mark.parametrize("arch,suffix", [("amd64", "x64"), ("i386", "ia32"), ("arm64", "aa64"), ("armhf", "arm"), ("riscv64", "riscv64")])

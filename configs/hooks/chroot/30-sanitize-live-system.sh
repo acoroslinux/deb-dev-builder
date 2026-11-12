@@ -16,6 +16,11 @@ if [ -f /var/lib/dbus/machine-id ] && [ ! -L /var/lib/dbus/machine-id ]; then
     rm -f /var/lib/dbus/machine-id
 fi
 
+# Do not ship the SSH host identity generated while building the live system.
+if [ -d /etc/ssh ]; then
+    rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+fi
+
 # Remove persistent udev network rules so interface naming is dynamic
 for udev_rule in /etc/udev/rules.d/70-persistent-net.rules /etc/udev/rules.d/70-persistent-cd.rules; do
     if [ -f "$udev_rule" ]; then

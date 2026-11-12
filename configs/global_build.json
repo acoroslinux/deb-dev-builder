@@ -24,10 +24,6 @@
     "machine_identity": true
   },
   "toolchain": {
-    "backend": "isolated-oci",
-    "oci_registry": "https://registry-1.docker.io",
-    "oci_repository": "library/debian",
-    "oci_reference": "trixie",
     "tarball_url": "",
     "tarball_sha256": ""
   }

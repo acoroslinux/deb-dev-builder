@@ -15,7 +15,7 @@ class HookError(RuntimeError):
 
 
 class HookManager:
-    """Execute the three existing phases without modifying the hook sources."""
+    """Execute flat shell scripts in the three configured hook phases."""
 
     STAGES = ("pre-chroot", "chroot", "post-chroot")
 
@@ -36,8 +36,11 @@ class HookManager:
     def scripts_for(self, stage: str):
         if stage not in self.STAGES:
             raise HookError(f"Unknown hook phase: {stage}")
+        if not self.enabled:
+            return []
+        self._validate_layout()
         directory = self.hooks_base / stage
-        if not self.enabled or not directory.is_dir():
+        if not directory.is_dir():
             return []
         return sorted(
             script for script in directory.iterdir()
@@ -45,6 +48,27 @@ class HookManager:
             and script.suffix == ".sh" and not script.name.startswith(".")
             and os.access(script, os.X_OK)
         )
+
+    def _validate_layout(self):
+        if not self.hooks_base.is_dir():
+            return
+        unsupported = []
+        for directory in self.hooks_base.iterdir():
+            if directory.name.startswith(".") or not directory.is_dir():
+                continue
+            if directory.name not in self.STAGES:
+                unsupported.append(directory.name)
+                continue
+            unsupported.extend(
+                str(child.relative_to(self.hooks_base))
+                for child in directory.iterdir()
+                if child.is_dir() and not child.name.startswith(".")
+            )
+        if unsupported:
+            raise HookError(
+                f"Unsupported hook directories in {self.hooks_base}: {', '.join(sorted(unsupported))}. "
+                f"Use only {', '.join(self.STAGES)}, with .sh files directly inside each phase."
+            )
 
     def _environment(self, stage: str, artifact: Optional[Path]):
         environment = os.environ.copy()

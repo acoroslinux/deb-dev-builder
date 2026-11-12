@@ -1,0 +1,6 @@
+# Keep native language-specific fonts, zoom and theme=dark switching available.
+# The GTK overlay supplies the regular face missing from fonts-dejavu-udeb.
+gtk-theme-name = "DebDevModern"
+gtk-font-name = "DejaVu Sans 9"
+gtk-button-images = true
+gtk-menu-images = true

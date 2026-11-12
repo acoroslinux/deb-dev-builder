@@ -1,0 +1,10 @@
+{
+  "machine_id": "etc/machine-id",
+  "dbus_id": "var/lib/dbus/machine-id",
+  "dbus_target": "/etc/machine-id",
+  "setup_binary": "usr/bin/systemd-machine-id-setup",
+  "setup_command": ["systemd-machine-id-setup"],
+  "ssh_server_binary": "usr/sbin/sshd",
+  "ssh_key_setup": ["ssh-keygen", "-A"],
+  "commit_mask": "etc/systemd/system/systemd-machine-id-commit.service"
+}

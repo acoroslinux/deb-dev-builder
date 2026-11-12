@@ -1,6 +1,7 @@
 {
   "live_user": {
     "name": "admin",
+    "password": "admin",
     "groups": ["sudo", "audio", "video"]
   }
 }

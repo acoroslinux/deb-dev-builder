@@ -2,5 +2,53 @@
   "desktop": "sway",
   "display_manager": "sddm",
   "session_type": "wayland",
-  "packages": ["sway", "sddm"]
+  "packages": [
+    "sway",
+    "sddm",
+    "foot",
+    "suckless-tools",
+    "mate-polkit",
+    "thunar",
+    "dex",
+    "xdg-desktop-portal-wlr",
+    "gnome-keyring",
+    "libpam-gnome-keyring"
+  ],
+  "distribution_overrides": {
+    "debian-13": {
+      "packages": [
+        "wmenu"
+      ]
+    },
+    "debian-14": {
+      "packages": [
+        "wmenu"
+      ]
+    },
+    "debian-testing": {
+      "packages": [
+        "wmenu"
+      ]
+    },
+    "debian-sid": {
+      "packages": [
+        "wmenu"
+      ]
+    },
+    "devuan-6": {
+      "packages": [
+        "wmenu"
+      ]
+    },
+    "devuan-testing": {
+      "packages": [
+        "wmenu"
+      ]
+    },
+    "devuan-ceres": {
+      "packages": [
+        "wmenu"
+      ]
+    }
+  }
 }

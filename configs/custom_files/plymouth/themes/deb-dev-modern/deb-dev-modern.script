@@ -1,31 +1,197 @@
-// Modern Universal Smooth Plymouth Script
+// @theme-settings
+// @theme-settings-end
+
+Window.SetBackgroundTopColor(theme.top_red, theme.top_green, theme.top_blue);
+Window.SetBackgroundBottomColor(theme.bottom_red, theme.bottom_green, theme.bottom_blue);
 wallpaper_image = Image("splash.png");
-screen_width = Window.GetWidth();
-screen_height = Window.GetHeight();
+wallpaper_sprite = Sprite();
+wallpaper_sprite.SetZ(-100);
+wallpaper_sprite.SetOpacity(theme.background_opacity);
+wallpaper_width = 0;
+wallpaper_height = 0;
+frame = 0;
+progress = 0;
+progress_width = -1;
+media_wait = 0;
 
-image_ratio = wallpaper_image.GetWidth() / wallpaper_image.GetHeight();
-screen_ratio = screen_width / screen_height;
-
-if (image_ratio > screen_ratio) {
-    scale_factor = screen_height / wallpaper_image.GetHeight();
-} else {
-    scale_factor = screen_width / wallpaper_image.GetWidth();
+fun text_image(text, font, red, green, blue) {
+    return Image.Text(text, red, green, blue, 1, font);
 }
 
-scaled_width = wallpaper_image.GetWidth() * scale_factor;
-scaled_height = wallpaper_image.GetHeight() * scale_factor;
+title_sprite = Sprite(text_image(theme.title, theme.title_font, 1, 1, 1));
+subtitle_sprite = Sprite(text_image(theme.subtitle, theme.subtitle_font,
+                                    theme.accent_red, theme.accent_green, theme.accent_blue));
+track_image = text_image(theme.bar_symbol, theme.message_font, 0.25, 0.29, 0.36);
+fill_image = text_image(theme.bar_symbol, theme.message_font,
+                        theme.accent_red, theme.accent_green, theme.accent_blue);
+track_sprite = Sprite();
+fill_sprite = Sprite();
+dot_image = text_image(theme.dot_symbol, theme.message_font,
+                       theme.accent_red, theme.accent_green, theme.accent_blue);
+for (index = 0; index < theme.dot_count; index++) dots[index] = Sprite(dot_image);
+prompt_sprite = Sprite();
+entry_sprite = Sprite();
+entry_border_image = text_image(theme.entry_symbol, theme.message_font,
+                               theme.accent_red, theme.accent_green, theme.accent_blue);
+entry_background_image = text_image(theme.entry_symbol, theme.message_font, 0.055, 0.075, 0.12);
+entry_border_sprite = Sprite();
+entry_background_sprite = Sprite();
+entry_hint_sprite = Sprite(text_image(theme.entry_hint, theme.message_font, 0.7, 0.78, 0.88));
+entry_hint_sprite.SetOpacity(0);
+entry_border_sprite.SetOpacity(0);
+entry_background_sprite.SetOpacity(0);
+dialog_active = 0;
+message_sprite = Sprite();
+// Load the notice's font/glyph resources before the live medium is ejected.
+media_title_sprite = Sprite(text_image(theme.media_title, theme.message_font, 1, 1, 1));
+media_hint_sprite = Sprite(text_image(theme.media_hint, theme.message_font, 1, 1, 1));
+media_title_sprite.SetOpacity(0);
+media_hint_sprite.SetOpacity(0);
 
-resized_wallpaper_image = wallpaper_image.Scale(scaled_width, scaled_height);
-wallpaper_sprite = Sprite(resized_wallpaper_image);
-wallpaper_sprite.SetX(screen_width / 2 - scaled_width / 2);
-wallpaper_sprite.SetY(screen_height / 2 - scaled_height / 2);
-wallpaper_sprite.SetZ(-100);
-wallpaper_sprite.SetOpacity(0);
+fun center_sprite(sprite, fraction, z) {
+    image = sprite.GetImage();
+    if (!image) return;
+    sprite.SetPosition(Window.GetX() + (Window.GetWidth() - image.GetWidth()) / 2,
+                       Window.GetY() + Window.GetHeight() * fraction, z);
+}
 
 fun refresh_callback () {
-    opacity = wallpaper_sprite.GetOpacity();
-    if (opacity < 1) {
-        wallpaper_sprite.SetOpacity(opacity + 0.05);
+    width = Window.GetWidth();
+    height = Window.GetHeight();
+    if (width <= 0 || height <= 0) return;
+    if (width != wallpaper_width || height != wallpaper_height) {
+        // The gradient and foreground remain usable if the optional PNG fails.
+        if (wallpaper_image) {
+            image_width = wallpaper_image.GetWidth();
+            image_height = wallpaper_image.GetHeight();
+            if (image_width > 0 && image_height > 0) {
+                scale = width / image_width;
+                if (height / image_height > scale) scale = height / image_height;
+                scaled_width = image_width * scale;
+                scaled_height = image_height * scale;
+                wallpaper_sprite.SetImage(wallpaper_image.Scale(scaled_width, scaled_height));
+                wallpaper_sprite.SetPosition(Window.GetX() + (width - scaled_width) / 2,
+                                             Window.GetY() + (height - scaled_height) / 2, -100);
+            }
+        }
+        global.wallpaper_width = width;
+        global.wallpaper_height = height;
+        global.progress_width = -1;
+        track_sprite.SetImage(track_image.Scale(width * theme.bar_fraction, theme.bar_height));
+        entry_width = width * theme.entry_fraction;
+        entry_border_sprite.SetImage(entry_border_image.Scale(entry_width, theme.entry_height));
+        entry_background_sprite.SetImage(entry_background_image.Scale(entry_width - 2 * theme.entry_border,
+                                                                      theme.entry_height - 2 * theme.entry_border));
     }
+    center_sprite(title_sprite, theme.title_y, 10);
+    center_sprite(subtitle_sprite, theme.subtitle_y, 10);
+    center_sprite(track_sprite, theme.progress_y, 10);
+    active = (frame % (theme.dot_count * theme.dot_frames)) / theme.dot_frames;
+    for (index = 0; index < theme.dot_count; index++) {
+        dots[index].SetPosition(Window.GetX() + width / 2 + (index - (theme.dot_count - 1) / 2) * theme.dot_spacing - dot_image.GetWidth() / 2,
+                                Window.GetY() + height * theme.dots_y, 10);
+        if (index <= active && active < index + 1) dots[index].SetOpacity(1);
+        else dots[index].SetOpacity(0.22);
+    }
+    if (!media_wait && !dialog_active) global.frame++;
+    fill_width = width * theme.bar_fraction * progress;
+    if (fill_width >= 1) {
+        if (fill_width != progress_width) {
+            fill_sprite.SetImage(fill_image.Scale(fill_width, theme.bar_height));
+            global.progress_width = fill_width;
+        }
+        fill_sprite.SetPosition(track_sprite.GetX(), track_sprite.GetY(), 11);
+        fill_sprite.SetOpacity(1);
+    } else fill_sprite.SetOpacity(0);
+    center_sprite(prompt_sprite, theme.prompt_y, 10000);
+    center_sprite(entry_sprite, theme.entry_y, 10000);
+    center_sprite(entry_border_sprite, theme.entry_y, 9998);
+    center_sprite(entry_background_sprite, theme.entry_y, 9999);
+    entry_background_sprite.SetY(entry_border_sprite.GetY() + theme.entry_border);
+    entry_image = entry_sprite.GetImage();
+    if (entry_image)
+        entry_sprite.SetY(entry_border_sprite.GetY() + (theme.entry_height - entry_image.GetHeight()) / 2);
+    center_sprite(entry_hint_sprite, theme.entry_hint_y, 10000);
+    center_sprite(message_sprite, theme.message_y, 10000);
+    center_sprite(media_title_sprite, theme.media_title_y, 10000);
+    center_sprite(media_hint_sprite, theme.media_hint_y, 10000);
+    if (media_wait) {
+        track_sprite.SetOpacity(0);
+        fill_sprite.SetOpacity(0);
+        for (index = 0; index < theme.dot_count; index++) dots[index].SetOpacity(0);
+    } else track_sprite.SetOpacity(1);
 }
+
+fun progress_callback(duration, value) {
+    if (value < 0) value = 0;
+    if (value > 1) value = 1;
+    global.progress = value;
+}
+
+fun show_text(sprite, text, fraction) {
+    sprite.SetImage(text_image(text, theme.message_font, 1, 1, 1));
+    center_sprite(sprite, fraction, 10000);
+    sprite.SetOpacity(1);
+}
+
+fun display_normal_callback () {
+    global.dialog_active = 0;
+    prompt_sprite.SetOpacity(0);
+    entry_sprite.SetOpacity(0);
+    entry_border_sprite.SetOpacity(0);
+    entry_background_sprite.SetOpacity(0);
+    entry_hint_sprite.SetOpacity(0);
+}
+
+fun display_password_callback (prompt, bullets) {
+    global.dialog_active = 1;
+    show_text(prompt_sprite, prompt, theme.prompt_y);
+    masked = "";
+    for (index = 0; index < bullets; index++) masked += "*";
+    show_text(entry_sprite, masked, theme.entry_y);
+    entry_border_sprite.SetOpacity(1);
+    entry_background_sprite.SetOpacity(1);
+    entry_hint_sprite.SetOpacity(1);
+    refresh_callback();
+}
+
+fun display_question_callback (prompt, entry) {
+    global.dialog_active = 1;
+    show_text(prompt_sprite, prompt, theme.prompt_y);
+    show_text(entry_sprite, entry, theme.entry_y);
+    entry_border_sprite.SetOpacity(1);
+    entry_background_sprite.SetOpacity(1);
+    entry_hint_sprite.SetOpacity(0);
+    refresh_callback();
+}
+
+fun display_message_callback (text) {
+    if (text == theme.media_removal_message) {
+        global.media_wait = 1;
+        media_title_sprite.SetOpacity(1);
+        media_hint_sprite.SetOpacity(1);
+        message_sprite.SetOpacity(0);
+        refresh_callback();
+        return;
+    }
+    if (media_wait) return;
+    show_text(message_sprite, text, theme.message_y);
+}
+
+fun hide_message_callback (text) {
+    if (text == theme.media_removal_message) {
+        global.media_wait = 0;
+        media_title_sprite.SetOpacity(0);
+        media_hint_sprite.SetOpacity(0);
+        refresh_callback();
+    } else if (!media_wait) message_sprite.SetOpacity(0);
+}
+
 Plymouth.SetRefreshFunction(refresh_callback);
+Plymouth.SetBootProgressFunction(progress_callback);
+Plymouth.SetDisplayNormalFunction(display_normal_callback);
+Plymouth.SetDisplayPasswordFunction(display_password_callback);
+Plymouth.SetDisplayQuestionFunction(display_question_callback);
+Plymouth.SetDisplayMessageFunction(display_message_callback);
+Plymouth.SetHideMessageFunction(hide_message_callback);
+refresh_callback();

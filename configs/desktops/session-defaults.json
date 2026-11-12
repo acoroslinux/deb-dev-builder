@@ -1,0 +1,204 @@
+{
+  "display_manager_aliases": {
+    "gdm": "gdm3"
+  },
+  "session_aliases": {
+    "kde": "plasma",
+    "plasma": "plasma"
+  },
+  "session_candidates": {
+    "kde": [
+      "plasma",
+      "plasmax11"
+    ],
+    "gnome": [
+      "gnome",
+      "gnome-xorg"
+    ],
+    "awesome": [
+      "deb-dev-awesome"
+    ],
+    "bspwm": [
+      "deb-dev-bspwm"
+    ],
+    "dwm": [
+      "deb-dev-dwm"
+    ],
+    "fluxbox": [
+      "deb-dev-fluxbox"
+    ],
+    "openbox": [
+      "deb-dev-openbox"
+    ],
+    "icewm": [
+      "deb-dev-icewm"
+    ],
+    "jwm": [
+      "deb-dev-jwm"
+    ],
+    "fvwm3": [
+      "deb-dev-fvwm3"
+    ],
+    "fvwm": [
+      "deb-dev-fvwm"
+    ],
+    "pekwm": [
+      "deb-dev-pekwm"
+    ],
+    "blackbox": [
+      "deb-dev-blackbox"
+    ],
+    "herbstluftwm": [
+      "deb-dev-herbstluftwm"
+    ],
+    "xmonad": [
+      "deb-dev-xmonad"
+    ],
+    "spectrwm": [
+      "deb-dev-spectrwm"
+    ],
+    "qtile": [
+      "deb-dev-qtile"
+    ],
+    "ratpoison": [
+      "deb-dev-ratpoison"
+    ],
+    "stumpwm": [
+      "deb-dev-stumpwm"
+    ],
+    "sawfish": [
+      "deb-dev-sawfish"
+    ],
+    "wmaker": [
+      "deb-dev-wmaker"
+    ],
+    "afterstep": [
+      "deb-dev-afterstep"
+    ],
+    "cwm": [
+      "deb-dev-cwm"
+    ],
+    "evilwm": [
+      "deb-dev-evilwm"
+    ],
+    "lwm": [
+      "deb-dev-lwm"
+    ],
+    "twm": [
+      "deb-dev-twm"
+    ],
+    "vtwm": [
+      "deb-dev-vtwm"
+    ],
+    "notion": [
+      "deb-dev-notion"
+    ],
+    "wm2": [
+      "deb-dev-wm2"
+    ],
+    "9wm": [
+      "deb-dev-9wm"
+    ],
+    "flwm": [
+      "deb-dev-flwm"
+    ],
+    "windowlab": [
+      "deb-dev-windowlab"
+    ],
+    "lxde": [
+      "LXDE"
+    ],
+    "budgie": [
+      "budgie-desktop"
+    ],
+    "enlightenment": [
+      "enlightenment"
+    ],
+    "gnome-flashback": [
+      "gnome-flashback-metacity"
+    ],
+    "sugar": [
+      "deb-dev-sugar"
+    ],
+    "lomiri": [
+      "lomiri"
+    ],
+    "phosh": [
+      "phosh"
+    ],
+    "labwc": [
+      "deb-dev-labwc"
+    ],
+    "wayfire": [
+      "deb-dev-wayfire"
+    ],
+    "weston": [
+      "weston"
+    ],
+    "aewmpp": [
+      "deb-dev-aewmpp"
+    ],
+    "clfswm": [
+      "deb-dev-clfswm"
+    ],
+    "ctwm": [
+      "deb-dev-ctwm"
+    ],
+    "fvwm-crystal": [
+      "deb-dev-fvwm-crystal"
+    ],
+    "miwm": [
+      "deb-dev-miwm"
+    ],
+    "mwm": [
+      "deb-dev-mwm"
+    ],
+    "w9wm": [
+      "deb-dev-w9wm"
+    ],
+    "ukwm": [
+      "deb-dev-ukwm"
+    ],
+    "metacity": [
+      "deb-dev-metacity"
+    ],
+    "marco": [
+      "deb-dev-marco"
+    ],
+    "muffin": [
+      "deb-dev-muffin"
+    ],
+    "kwin": [
+      "deb-dev-kwin"
+    ],
+    "xfwm4": [
+      "deb-dev-xfwm4"
+    ],
+    "matchbox": [
+      "deb-dev-matchbox"
+    ],
+    "compiz": [
+      "deb-dev-compiz"
+    ],
+    "gnome-classic": [
+      "gnome-classic",
+      "gnome-classic-xorg"
+    ]
+  },
+  "session_directories": [
+    "usr/share/xsessions",
+    "usr/share/wayland-sessions"
+  ],
+  "fallback_session": "xfce",
+  "display_servers": {
+    "wayland": "x11",
+    "default": "x11"
+  },
+  "pam_autologin_template": "#%PAM-1.0\nauth        requisite   pam_succeed_if.so user != root quiet_success\nauth        required    pam_permit.so\n@include common-account\n@include common-session\n",
+  "file_mode": "0644",
+  "default_manager_file": "etc/X11/default-display-manager",
+  "console_autologin": {
+    "path": "etc/systemd/system/getty@tty1.service.d/autologin.conf",
+    "content": "[Service]\nExecStart=\nExecStart=-/sbin/agetty -o '-p -f -- \\\\u' --noclear --autologin {live_user} %I $TERM\n"
+  }
+}

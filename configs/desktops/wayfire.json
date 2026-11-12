@@ -1,0 +1,29 @@
+{
+  "desktop": "wayfire",
+  "display_manager": "sddm",
+  "session_type": "wayland",
+  "packages": [
+    "wayfire",
+    "wf-shell",
+    "sddm",
+    "alacritty",
+    "wofi",
+    "wlogout",
+    "kanshi",
+    "wlsunset",
+    "light",
+    "mate-polkit",
+    "dex",
+    "thunar",
+    "gnome-keyring",
+    "libpam-gnome-keyring",
+    "xdg-desktop-portal-wlr",
+    "python3"
+  ],
+  "supported_suites": [
+    "trixie",
+    "sid",
+    "excalibur",
+    "ceres"
+  ]
+}

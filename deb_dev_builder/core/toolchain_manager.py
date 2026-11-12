@@ -12,13 +12,11 @@ import logging
 import hashlib
 import re
 import tarfile
+from deb_dev_builder.core.runtime_config import load_runtime, merge_settings
 
 logger = logging.getLogger("toolchain_manager")
 
 _HOST_ARCH = platform.machine().lower()
-_DEVUAN_KEYRING_URL = "https://pkgmaster.devuan.org/devuan/pool/main/d/devuan-keyring/devuan-keyring_2026.01.13_all.deb"
-_DEVUAN_KEYRING_SHA256 = "c53429b645bea3a6edd427d70b7fb49b629a99fc9b9915260026a300540400f2"
-
 class ToolchainManagerError(Exception):
     pass
 
@@ -44,8 +42,8 @@ class ToolchainManager:
         self.force_isolated = force_isolated
         self.target_arch = target_arch.lower()
         self.distro = distro
-        self.required_tools = required_tools or ["mksquashfs", "xorriso", "grub-mkstandalone", "mcopy", "mmd", "mkfs.vfat"]
-        self.toolchain_config = toolchain_config or {}
+        self.toolchain_config = merge_settings(load_runtime()["toolchain"], toolchain_config or {})
+        self.required_tools = list(self.toolchain_config["required_tools"] if required_tools is None else required_tools)
         self.build_host_dir = self.workdir_base.parent / "build_host"
         # Reusable state lives outside the disposable architecture workdir.
         # Derive this from the supplied workdir so alternate project roots and
@@ -75,7 +73,7 @@ class ToolchainManager:
             logger.info("[MOCK TOOLCHAIN] Simulating build_host setup.")
             return
 
-        requested_backend = self.toolchain_config.get("backend", "isolated-oci")
+        requested_backend = self.toolchain_config["backend"]
         if requested_backend == "native":
             raise ToolchainManagerError("Native host toolchains are disabled; use an isolated cached toolchain tarball")
         if requested_backend not in {"auto", "isolated-tarball", "isolated-oci"}:
@@ -92,6 +90,52 @@ class ToolchainManager:
         self.use_isolated = self._is_bootstrapped()
         if not self.use_isolated:
             raise ToolchainManagerError("Could not prepare the isolated build toolchain")
+        self.ensure_build_dependencies()
+
+    def _missing_build_packages(self) -> list[str]:
+        status = self.build_host_dir / "var/lib/dpkg/status"
+        installed = set()
+        if status.is_file():
+            for paragraph in status.read_text().split("\n\n"):
+                fields = dict(line.split(": ", 1) for line in paragraph.splitlines() if ": " in line and not line.startswith(" "))
+                if fields.get("Status") == "install ok installed" and fields.get("Package"):
+                    installed.add(fields["Package"])
+                    installed.add(f'{fields["Package"]}:{fields.get("Architecture", "")}')
+        return [package for package in self.toolchain_config["packages"] if package not in installed]
+
+    def ensure_build_dependencies(self):
+        """Bring restored build-host caches up to the current JSON policy."""
+        missing_packages = self._missing_build_packages()
+        missing_tools = [tool for tool in self.required_tools if not self._tool_in_build_host(tool)]
+        if not missing_packages and not missing_tools:
+            return
+        if not self._is_base_rootfs():
+            raise ToolchainManagerError("Cannot update build dependencies: isolated build host has no APT rootfs")
+        was_mounted = self.is_mounted
+        try:
+            if not was_mounted:
+                self.mount_virtual_fs()
+            logger.info("Updating cached build-host dependencies: %s", ", ".join(missing_packages or missing_tools))
+            for architecture in self.toolchain_config["foreign_architectures"]:
+                self.run_in_build_host(["dpkg", "--add-architecture", architecture], check=True)
+            self.run_in_build_host(["apt-get", "update"], check=True)
+            # Reinstall configured providers if package metadata claims they
+            # are present but a required executable has disappeared.
+            packages = missing_packages or self.toolchain_config["packages"]
+            install = ["apt-get", "install", "-y"]
+            if not missing_packages:
+                install.append("--reinstall")
+            self.run_in_build_host([*install, *packages], check=True)
+            missing_tools = [tool for tool in self.required_tools if not self._tool_in_build_host(tool)]
+            remaining_packages = self._missing_build_packages()
+            if missing_tools or remaining_packages:
+                raise ToolchainManagerError(
+                    "Isolated build-host dependencies remain missing: " + ", ".join(missing_tools + remaining_packages)
+                )
+            self.cache_build_host()
+        finally:
+            if not was_mounted:
+                self.umount_virtual_fs()
 
     def _host_is_compatible(self) -> bool:
         """Native mode is restricted to Debian Trixie hosts for reproducibility."""
@@ -185,35 +229,36 @@ class ToolchainManager:
             return
         if not self.is_mounted:
             raise ToolchainManagerError("Devuan keyring installation requires a mounted isolated build host")
-        keyring = self.build_host_dir / "usr" / "share" / "keyrings" / "devuan-archive-keyring.pgp"
-        if keyring.is_file():
+        keyring_path = self.build_host_dir / "usr" / "share" / "keyrings" / "devuan-archive-keyring.pgp"
+        if keyring_path.is_file():
             return
-        cache = self.cache_dir / "keyrings" / "devuan-keyring_2026.01.13_all.deb"
+        keyring = self.toolchain_config["devuan_keyring"]
+        cache = self.cache_dir / "keyrings" / keyring["filename"]
         cache.parent.mkdir(parents=True, exist_ok=True)
-        if not cache.is_file() or self._sha256(cache) != _DEVUAN_KEYRING_SHA256:
+        if not cache.is_file() or self._sha256(cache) != keyring["sha256"]:
             bundled = self.project_root / "tools" / "keyrings" / cache.name
-            if bundled.is_file() and self._sha256(bundled) == _DEVUAN_KEYRING_SHA256:
+            if bundled.is_file() and self._sha256(bundled) == keyring["sha256"]:
                 shutil.copy2(bundled, cache)
             else:
                 partial = cache.with_name(f"{cache.name}.partial")
                 partial.unlink(missing_ok=True)
                 try:
-                    urllib.request.urlretrieve(_DEVUAN_KEYRING_URL, partial)
+                    urllib.request.urlretrieve(keyring["url"], partial)
                 except OSError as exc:
                     partial.unlink(missing_ok=True)
                     raise ToolchainManagerError(f"Could not download the pinned Devuan keyring: {exc}") from exc
-                if self._sha256(partial) != _DEVUAN_KEYRING_SHA256:
+                if self._sha256(partial) != keyring["sha256"]:
                     partial.unlink(missing_ok=True)
                     raise ToolchainManagerError("Devuan keyring SHA-256 verification failed")
                 partial.replace(cache)
-            if self._sha256(cache) != _DEVUAN_KEYRING_SHA256:
+            if self._sha256(cache) != keyring["sha256"]:
                 cache.unlink(missing_ok=True)
                 raise ToolchainManagerError("Devuan keyring SHA-256 verification failed")
         destination = self.build_host_dir / "tmp" / cache.name
         shutil.copy2(cache, destination)
         self.run_in_build_host(["dpkg", "--install", f"/tmp/{cache.name}"])
         destination.unlink(missing_ok=True)
-        if not keyring.is_file():
+        if not keyring_path.is_file():
             raise ToolchainManagerError("Devuan keyring package did not install its archive keyring")
 
     def ensure_devuan_debootstrap_scripts(self, suites: list[str]) -> None:
@@ -331,13 +376,13 @@ class ToolchainManager:
 
     def bootstrap_from_official_oci(self) -> None:
         """Bootstrap a build host from the official Debian OCI image into the workspace."""
-        repository = self.toolchain_config.get("oci_repository", "library/debian")
-        reference = self.toolchain_config.get("oci_reference", "bookworm")
-        registry = self.toolchain_config.get("oci_registry", "https://registry-1.docker.io")
+        repository = self.toolchain_config["oci_repository"]
+        reference = self.toolchain_config["oci_reference"]
+        registry = self.toolchain_config["oci_registry"]
         if not all(isinstance(value, str) and value for value in (repository, reference, registry)):
             raise ToolchainManagerError("Invalid OCI bootstrap configuration")
-        token_url = "https://auth.docker.io/token?" + urllib.parse.urlencode({
-            "service": "registry.docker.io", "scope": f"repository:{repository}:pull",
+        token_url = self.toolchain_config["oci_auth_url"] + "?" + urllib.parse.urlencode({
+            "service": self.toolchain_config["oci_auth_service"], "scope": f"repository:{repository}:pull",
         })
         try:
             with urllib.request.urlopen(token_url) as response:
@@ -395,14 +440,8 @@ class ToolchainManager:
         self.use_isolated = True
         try:
             self.mount_virtual_fs()
-            packages = [
-                "mmdebstrap", "debootstrap", "squashfs-tools", "zstd", "xorriso", "grub-common", "grub-pc-bin",
-                "grub-efi-amd64-bin", "grub-efi-ia32-bin", "grub-efi-arm64-bin:arm64", "grub-efi-arm-bin:armhf",
-                "grub-efi-riscv64-bin:riscv64", "grub-ieee1275-bin:ppc64el", "mtools", "dosfstools", "qemu-utils", "qemu-user-static", "parted",
-                "btrfs-progs", "syslinux-utils", "syslinux-common", "extlinux", "fdisk", "util-linux", "ca-certificates", "xfsprogs", "f2fs-tools",
-                "xz-utils", "gzip", "lz4",
-            ]
-            for architecture in ("arm64", "armhf", "riscv64", "ppc64el"):
+            packages = self.toolchain_config["packages"]
+            for architecture in self.toolchain_config["foreign_architectures"]:
                 self.run_in_build_host(["dpkg", "--add-architecture", architecture], check=True)
             self.run_in_build_host(["apt-get", "update"], check=True)
             self.run_in_build_host(["apt-get", "install", "-y", *packages], check=True)
@@ -428,15 +467,9 @@ class ToolchainManager:
             safe_remove_tree(self.build_host_dir, allowed_root=resolve_from_project("workdir").parent)
         self.build_host_dir.mkdir(parents=True, exist_ok=True)
 
-        mirror = "http://deb.debian.org/debian"
-        suite = "bookworm"
-
-        host_tools = [
-            "squashfs-tools", "zstd", "xorriso", "grub-common", "grub-pc-bin",
-            "grub-efi-amd64-bin", "grub-efi-ia32-bin", "mtools", "dosfstools", "qemu-utils", "parted", "btrfs-progs",
-            "syslinux-utils", "fdisk", "util-linux", "ca-certificates",
-            "xfsprogs", "f2fs-tools", "xz-utils", "gzip", "lz4"
-        ]
+        mirror = self.toolchain_config["bootstrap_mirror"]
+        suite = self.toolchain_config["bootstrap_suite"]
+        host_tools = self.toolchain_config["bootstrap_packages"]
 
         if shutil.which("mmdebstrap"):
             cmd = [
@@ -487,6 +520,7 @@ class ToolchainManager:
             ("proc", self.build_host_dir / "proc", "proc", None),
             ("sysfs", self.build_host_dir / "sys", "sysfs", None),
             ("/dev", self.build_host_dir / "dev", None, "--bind"),
+            ("devpts", self.build_host_dir / "dev/pts", "devpts", "newinstance,ptmxmode=0666,mode=0620,gid=5"),
         ]
         for src, target, fstype, opts in mounts:
             target.mkdir(parents=True, exist_ok=True)
@@ -504,6 +538,8 @@ class ToolchainManager:
                     )
                 continue
             cmd = ["mount", "-t", fstype]
+            if opts:
+                cmd.extend(["-o", opts])
             cmd.extend([src, str(target)])
             result = subprocess.run(cmd, check=False, stderr=subprocess.PIPE, text=True)
             if result.returncode != 0:
@@ -575,7 +611,7 @@ class ToolchainManager:
 
         return self.run_in_build_host([tool_binary] + args, check=check)
 
-    def run_in_build_host(self, command: Union[str, List[str]], check: bool = True) -> subprocess.CompletedProcess:
+    def run_in_build_host(self, command: Union[str, List[str]], check: bool = True, *, capture_output=False, text=False) -> subprocess.CompletedProcess:
         if self.mode == "mock":
             cmd_str = command if isinstance(command, str) else " ".join(command)
             logger.info(f"[MOCK BUILD_HOST EXEC] {cmd_str}")
@@ -588,4 +624,4 @@ class ToolchainManager:
         else:
             cmd = ["chroot", str(self.build_host_dir)] + list(command)
 
-        return subprocess.run(cmd, check=check)
+        return subprocess.run(cmd, check=check, capture_output=capture_output, text=text)

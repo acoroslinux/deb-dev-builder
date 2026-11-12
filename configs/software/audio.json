@@ -7,6 +7,7 @@
     "wireplumber",
     "libspa-0.2-bluetooth",
     "pavucontrol",
+    "pulseaudio-utils",
     "alsa-utils"
   ]
 }

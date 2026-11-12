@@ -1,0 +1,21 @@
+{
+  "desktop": "gnome-flashback",
+  "display_manager": "lightdm",
+  "session_type": "x11",
+  "packages": [
+    "gnome-session-flashback",
+    "lightdm",
+    "lightdm-gtk-greeter",
+    "gnome-terminal",
+    "gnome-power-manager",
+    "gnome-screensaver",
+    "gnome-keyring",
+    "libpam-gnome-keyring"
+  ],
+  "supported_suites": [
+    "bookworm",
+    "trixie",
+    "daedalus",
+    "excalibur"
+  ]
+}

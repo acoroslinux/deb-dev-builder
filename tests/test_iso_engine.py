@@ -2,10 +2,42 @@ import pytest
 import tarfile
 from pathlib import Path
 from deb_dev_builder.core.toolchain_manager import ToolchainManager
-from deb_dev_builder.core.iso_engine import ISOEngine
+from deb_dev_builder.core.iso_engine import ISOEngine, ISOEngineError
 from deb_dev_builder.core.path_utils import resolve_from_project, resolve_output_path
 
 class TestISOEngine:
+    @pytest.mark.parametrize("result", ["success", "failure", "empty"])
+    def test_iso_publication_preserves_open_media_and_failed_builds(self, tmp_path, result):
+        import subprocess
+
+        destination = tmp_path / "live.iso"
+        destination.write_bytes(b"previous ISO")
+        pending_paths = []
+
+        class Runner:
+            def run_tool(self, command, args, check=True):
+                assert command == "xorriso"
+                assert check is True
+                pending = Path(args[args.index("-o") + 1])
+                pending_paths.append(pending)
+                assert pending != destination
+                assert destination.read_bytes() == b"previous ISO"
+                pending.write_bytes(b"new ISO" if result != "empty" else b"")
+                if result == "failure":
+                    raise subprocess.CalledProcessError(1, command)
+
+        engine = ISOEngine(tmp_path / "work", tmp_path / "root", str(destination), {"architecture": "amd64"}, "real", Runner())
+        with destination.open("rb") as mounted_media:
+            if result == "success":
+                engine._publish_iso(destination, ["-as", "mkisofs"])
+                assert destination.read_bytes() == b"new ISO"
+            else:
+                with pytest.raises((subprocess.CalledProcessError, ISOEngineError)):
+                    engine._publish_iso(destination, ["-as", "mkisofs"])
+                assert destination.read_bytes() == b"previous ISO"
+            assert mounted_media.read() == b"previous ISO"
+        assert not pending_paths[0].parent.exists()
+
     def test_mock_iso_build(self, tmp_path):
         workdir = tmp_path / "amd64"
         target_root = workdir / "chroot"

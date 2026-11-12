@@ -19,6 +19,7 @@ from deb_dev_builder.core.iso_engine import ISOEngineError
 from deb_dev_builder.core.disk_engine import DiskEngineError
 from deb_dev_builder.core.container_engine import ContainerEngineError
 from deb_dev_builder.core.config_loader import ConfigLoader, ConfigLoaderError
+from deb_dev_builder.core.runtime_config import load_runtime, RuntimeConfigError, catalog_document_paths
 from deb_dev_builder.core.path_utils import resolve_from_project
 
 
@@ -28,7 +29,11 @@ def _available_profiles(config_root: Path, category: str, profile_key: str = Non
         return []
     profiles = []
     loader = ConfigLoader(config_root=config_root)
+    catalog = config_root / "catalog.json"
+    module_documents = catalog_document_paths(catalog) if catalog.exists() else set()
     for path in category_dir.glob("*.json"):
+        if path.resolve() in module_documents:
+            continue
         if profile_key is None or profile_key in loader.load_json(path):
             profiles.append(path.stem)
     return sorted(profiles)
@@ -56,8 +61,6 @@ def _parse_list_arg(arg_value) -> list:
     return items
 
 
-VALID_ARCHS = ("amd64", "x86_64", "i386", "i686", "aarch64", "armhf", "riscv64")
-
 
 class CustomArgumentParser(argparse.ArgumentParser):
     def error(self, message):
@@ -67,6 +70,18 @@ class CustomArgumentParser(argparse.ArgumentParser):
 
 def main():
     default_config_path = resolve_from_project("configs/global_build.json")
+    # Resolve the configuration before building the full parser so JSON defaults
+    # also apply when the caller selects a different global configuration.
+    bootstrap = argparse.ArgumentParser(add_help=False)
+    bootstrap.add_argument("-c", "--config", default=str(default_config_path))
+    selected, _ = bootstrap.parse_known_args()
+    try:
+        runtime = load_runtime(ConfigLoader().load_json(resolve_from_project(selected.config)))
+        defaults = runtime["cli"]
+    except (ConfigLoaderError, RuntimeConfigError) as exc:
+        print(f"❌ Configuration error: {exc}", file=sys.stderr)
+        return 2
+
 
     parser = CustomArgumentParser(
         description="Deb-Dev-Builder: Modular Debian & Devuan Linux ISO & Image Builder",
@@ -88,9 +103,9 @@ def main():
     parser.add_argument(
         "architecture",
         nargs="?",
-        default="amd64",
-        choices=list(VALID_ARCHS),
-        help="Target architecture (amd64, i386, aarch64, armhf, riscv64). Default: amd64",
+        default=defaults["architecture"],
+        choices=defaults["architectures"],
+        help="Target architecture (amd64, i386, aarch64, armhf, riscv64). Default: %(default)s",
     )
 
     parser.add_argument(
@@ -103,16 +118,16 @@ def main():
 
     parser.add_argument(
         "--mode",
-        choices=["mock", "real"],
-        default="mock",
-        help="Execution mode: 'mock' (simulation, no root required) or 'real' (actual build, requires root). Default: mock",
+        choices=defaults["modes"],
+        default=defaults["mode"],
+        help="Execution mode: 'mock' (simulation, no root required) or 'real' (actual build, requires root). Default: %(default)s",
     )
 
     parser.add_argument(
         "--clean",
         dest="clean",
         action="store_true",
-        default=True,
+        default=defaults["clean"],
         help="Remove the target work directory before and after a real build (default).",
     )
     parser.add_argument(
@@ -130,8 +145,8 @@ def main():
     parser.add_argument(
         "--distro",
         type=str,
-        default="debian-13",
-        help="Distro profile (e.g. debian-13, debian-14, devuan-6, devuan-5). Default: debian-13",
+        default=defaults["distro"],
+        help="Distro profile (e.g. debian-13, debian-14, devuan-6, devuan-5). Default: %(default)s",
     )
 
     parser.add_argument(
@@ -153,15 +168,15 @@ def main():
         "--desktop",
         type=str,
         default=None,
-        help="Desktop environment profile (gnome, kde, xfce, mate, cinnamon, lxqt, i3, sway, hyprland).",
+        help="Desktop or window-manager profile from configs/desktops (use --list-options to see available names).",
     )
 
     parser.add_argument(
         "-k",
         "--kernel",
         type=str,
-        default="generic",
-        help="Kernel flavor profile: 'generic' (standard desktop/server kernel), 'rt' (real-time PREEMPT_RT kernel), or 'cloud' (minimal virtualized cloud kernel). Default: generic",
+        default=defaults["kernel"],
+        help="Kernel flavor profile: 'generic' (standard desktop/server kernel), 'rt' (real-time PREEMPT_RT kernel), or 'cloud' (minimal virtualized cloud kernel). Default: %(default)s",
     )
 
     parser.add_argument(
@@ -171,7 +186,7 @@ def main():
         default=None,
         help="Bootloader profile (grub2-hybrid, grub2-uefi, grub2-bios, syslinux). Default: hybrid on x86 ISO, UEFI otherwise",
     )
-    parser.add_argument("--fs-type", type=str, default="ext4", choices=["ext4", "btrfs", "xfs", "f2fs"], help="Root filesystem type (ext4, btrfs, xfs, f2fs). Default: ext4")
+    parser.add_argument("--fs-type", type=str, default=defaults["filesystem"], choices=defaults["filesystems"], help="Root filesystem type (ext4, btrfs, xfs, f2fs). Default: %(default)s")
 
     parser.add_argument(
         "-p",
@@ -204,9 +219,9 @@ def main():
     parser.add_argument(
         "-f",
         "--format",
-        choices=["iso", "netboot", "img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi", "tarball", "container", "oci"],
-        default="iso",
-        help="Output artifact format: iso, netboot, img/raw, qcow2, vdi, vmdk, vhd/vhdx, tarball, or OCI/container. Default: iso",
+        choices=defaults["formats"],
+        default=defaults["format"],
+        help="Output artifact format: iso, netboot, img/raw, qcow2, vdi, vmdk, vhd/vhdx, tarball, or OCI/container. Default: %(default)s",
     )
 
     parser.add_argument(
@@ -214,7 +229,7 @@ def main():
         "--output",
         type=str,
         default=None,
-        help="Output filename for the final build artifact.",
+        help="Output prefix or path; build metadata and a unique build ID are appended to the filename.",
     )
 
     parser.add_argument(
@@ -233,9 +248,9 @@ def main():
 
     parser.add_argument(
         "--compression",
-        choices=["zstd", "xz", "gzip", "lz4"],
+        choices=defaults["compressions"],
         default=None,
-        help="SquashFS compression algorithm. Default: zstd",
+        help="SquashFS compression algorithm. Default comes from configs/catalog.json",
     )
 
     parser.add_argument(
@@ -249,7 +264,7 @@ def main():
         "--with-di",
         dest="with_debian_installer",
         action="store_true",
-        help="Include official Debian Installer (d-i) kernel, initrd, and boot menu entries.",
+        help="Include the selected distribution's native d-i kernel, initrd, and boot menu entries (Debian or Devuan).",
     )
 
     parser.add_argument(
@@ -261,9 +276,9 @@ def main():
 
     parser.add_argument(
         "--di-mode",
-        choices=["live", "netinstall", "netboot"],
-        default="live",
-        help="Debian Installer operation mode: 'live' (Live ISO + d-i), 'netinstall' (minimal netinstall ISO), or 'netboot' (PXE/TFTP boot archive). Default: live",
+        choices=defaults["di_modes"],
+        default=defaults["di_mode"],
+        help="Debian Installer mode: 'live' (install the ISO's SquashFS), 'netinstall' (install packages from network repositories), or 'netboot' (PXE/TFTP boot archive). Default: %(default)s",
     )
 
     parser.add_argument(
@@ -400,7 +415,7 @@ def main():
             # Explicitly update args.architecture if not provided on CLI
             if "architecture" in dev_cfg:
                 # If architecture was not passed in sys.argv (not considering flags for architecture since it is positional usually)
-                arch_passed = any(a in VALID_ARCHS for a in sys.argv[1:])
+                arch_passed = any(a in defaults["architectures"] for a in sys.argv[1:])
                 if not arch_passed or getattr(args, "architecture", "") == "x86_64":
                     args.architecture = dev_cfg["architecture"]
             
@@ -416,12 +431,7 @@ def main():
         else:
             parser.error(f"Unknown hardware device profile: {args.device}")
                 
-    # Map architectures to Debian style
-    if hasattr(args, 'architecture'):
-        if args.architecture == 'x86_64':
-            args.architecture = 'amd64'
-        elif args.architecture == 'i686':
-            args.architecture = 'i386'
+    args.architecture = runtime["architecture_aliases"].get(args.architecture, args.architecture)
 
 
     config_root = resolve_from_project("configs")
@@ -448,7 +458,7 @@ def main():
         sys.exit(0)
 
     arch_lower = args.architecture.lower()
-    if arch_lower not in VALID_ARCHS:
+    if arch_lower not in defaults["architectures"]:
         print(f"Error: Architecture '{args.architecture}' is not supported.", file=sys.stderr)
         sys.exit(1)
 
@@ -498,7 +508,7 @@ def main():
             hardware_profile=args.device,
             vm_profile=args.vm_profile,
         )
-    except (ConfigLoaderError, BuildOrchestratorError) as exc:
+    except (ConfigLoaderError, RuntimeConfigError, BuildOrchestratorError) as exc:
         print(f"❌ Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
@@ -522,4 +532,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

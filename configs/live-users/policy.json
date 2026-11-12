@@ -1,0 +1,14 @@
+{
+  "shell": "/bin/bash",
+  "autologin_group": "nopasswdlogin",
+  "admin_group": "sudo",
+  "sudoers_path": "etc/sudoers.d/live_user_nopasswd",
+  "sudoers_template": "{user} ALL=(ALL) NOPASSWD: ALL\n",
+  "sudoers_mode": "0440",
+  "home_mode": "0755",
+  "temporary_mode": "1777",
+  "temporary_paths": [
+    "/tmp",
+    "/var/tmp"
+  ]
+}

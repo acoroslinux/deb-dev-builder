@@ -1,0 +1,20 @@
+{
+  "desktop": "gnome-classic",
+  "display_manager": "gdm",
+  "session_type": "both",
+  "supported_suites": [
+    "bookworm",
+    "trixie",
+    "forky",
+    "testing",
+    "sid",
+    "daedalus",
+    "excalibur"
+  ],
+  "packages": [
+    "gnome-core",
+    "gdm3",
+    "network-manager-gnome",
+    "gnome-shell-extensions"
+  ]
+}

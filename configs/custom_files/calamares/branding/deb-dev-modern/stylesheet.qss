@@ -1,47 +1,108 @@
-/* Calamares Stylesheet - Deb-Dev Modern Theme */
-
-/* Sidebar Area styling */
-#sidebarApp {
-    background-color: #1A1C1E;
-    min-width: 200px;
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * Keep native widgets, focus handling and installer progress. This light
+ * content palette is deliberately independent of the live desktop theme.
+ */
+QWidget {
+    color: #23324a;
+    background-color: #f5f7fb;
+    selection-background-color: #d7e9ff;
+    selection-color: #172b48;
 }
-
-#sidebarApp QLabel {
-    color: #8C92AC;
-    font-size: 13px;
-    font-weight: 500;
-    padding: 8px 16px;
+QWidget#sidebarApp, #sidebarApp QWidget, #logoApp {
+    background-color: #101a2c;
+    color: #b5c5dc;
+    border: none;
+}
+#sidebarApp QAbstractItemView {
     background-color: transparent;
+    border: none;
+    outline: none;
 }
-
-#sidebarApp QLabel[selected="true"] {
-    color: #47A7F5;
+#sidebarApp QPushButton {
+    color: #c5d4e8;
+    background-color: transparent;
+    border: 1px solid transparent;
+    min-width: 0;
+    padding: 6px;
+}
+#sidebarApp QPushButton:hover, #sidebarApp QPushButton:focus {
+    background-color: #263e5c;
+    border-color: #55789d;
+}
+QLabel { background-color: transparent; }
+QPushButton {
+    min-height: 24px;
+    min-width: 70px;
+    padding: 5px 14px;
+    border: 1px solid #c8d3e2;
+    border-radius: 6px;
+    background-color: #ffffff;
+    color: #23324a;
+}
+QPushButton:hover { background-color: #eaf2ff; border-color: #7fa8d9; }
+QPushButton:pressed { background-color: #d9e8fa; }
+QPushButton:focus { border: 2px solid #3573b7; padding: 4px 13px; }
+QPushButton#view-button-next {
+    color: #ffffff;
+    background-color: #285e98;
+    border-color: #285e98;
     font-weight: bold;
-    background-color: #24292F;
 }
-
-#logoApp {
-    background-color: #1A1C1E;
-    padding: 20px;
+QPushButton#view-button-next:hover { background-color: #214e80; }
+QPushButton#view-button-next:focus { border-color: #102e53; }
+QPushButton:disabled, QPushButton#view-button-next:disabled {
+    color: #8c99aa;
+    background-color: #e8edf4;
+    border-color: #d9e0e9;
 }
-
-/* Navigation buttons bar at the bottom */
-#navigationWidget {
-    background-color: #1A1C1E;
-    border-top: 1px solid #2A2D35;
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit, QPlainTextEdit {
+    min-height: 24px;
+    padding: 5px 8px;
+    border: 1px solid #c8d3e2;
+    border-radius: 5px;
+    background-color: #ffffff;
+    color: #23324a;
 }
-
-/* Custom styled progress bar with modern gradient */
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
+QTextEdit:focus, QPlainTextEdit:focus { border-color: #3573b7; }
+QComboBox QAbstractItemView, QAbstractItemView {
+    background-color: #ffffff;
+    color: #23324a;
+    alternate-background-color: #f0f4fa;
+    selection-background-color: #d7e9ff;
+    selection-color: #172b48;
+    border: 1px solid #d4deeb;
+}
+QHeaderView::section {
+    background-color: #e9eff7;
+    color: #23324a;
+    padding: 6px;
+    border: none;
+    border-bottom: 1px solid #d4deeb;
+}
+QGroupBox {
+    border: 1px solid #d4deeb;
+    border-radius: 7px;
+    margin-top: 12px;
+    padding-top: 12px;
+}
+QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; }
 QProgressBar {
-    border: 1px solid #A0A5B5;
-    background-color: #E1E4EA;
-    border-radius: 4px;
+    min-height: 18px;
+    background-color: #e4eaf3;
+    color: #172b48;
+    border: 1px solid #cbd7e6;
+    border-radius: 5px;
     text-align: center;
-    color: #121314;
-    font-weight: bold;
 }
-
 QProgressBar::chunk {
-    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #47A7F5, stop:1 #9E00FF);
-    border-radius: 3px;
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #67c6e0, stop:1 #9aa6eb);
+    border-radius: 4px;
+}
+QToolTip {
+    background-color: #182840;
+    color: #f5f8ff;
+    border: 1px solid #55708f;
+    padding: 6px;
 }

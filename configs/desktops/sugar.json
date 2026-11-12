@@ -1,0 +1,23 @@
+{
+  "desktop": "sugar",
+  "display_manager": "lightdm",
+  "session_type": "x11",
+  "packages": [
+    "sugar-session",
+    "lightdm",
+    "lightdm-gtk-greeter",
+    "sugar-terminal-activity",
+    "mate-polkit",
+    "dex",
+    "xss-lock",
+    "i3lock"
+  ],
+  "supported_suites": [
+    "bookworm",
+    "trixie",
+    "sid",
+    "daedalus",
+    "excalibur",
+    "ceres"
+  ]
+}

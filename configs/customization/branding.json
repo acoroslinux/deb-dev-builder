@@ -1,0 +1,5 @@
+{
+  "pretty_name": "{base_name} Modern GNU/Linux",
+  "os_release": "NAME=\"{base_name} Modern\"\nID=\"{base_id}_modern\"\nID_LIKE=\"{base_id}\"\nPRETTY_NAME=\"{pretty_name}\"\nVERSION=\"2026.08\"\nVERSION_ID=\"2026.08\"\nHOME_URL=\"https://github.com/acoroslinux/deb-dev-builder\"\nSUPPORT_URL=\"https://github.com/acoroslinux/deb-dev-builder\"\nBUG_REPORT_URL=\"https://github.com/acoroslinux/deb-dev-builder\"\n",
+  "issue": "{pretty_name} \\r (\\l)\n\n"
+}

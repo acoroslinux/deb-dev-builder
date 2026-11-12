@@ -1,0 +1,11 @@
+{
+  "enabled_by_default": true,
+  "systemd": {
+    "path": "etc/systemd/zram-generator.conf",
+    "content": "[zram0]\nzram-size = ram / 2\ncompression-algorithm = zstd\n"
+  },
+  "default": {
+    "path": "etc/default/zramswap",
+    "content": "ALGO=zstd\nPERCENT=50\nPRIORITY=100\n"
+  }
+}

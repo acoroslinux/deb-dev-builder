@@ -1,0 +1,220 @@
+{
+  "default_live_profile": "liveuser",
+  "init_systems": {
+    "debian": "systemd",
+    "devuan": "sysvinit"
+  },
+  "default_init_system": "systemd",
+  "live_desktop_profiles": [
+    "filesystems",
+    "networking",
+    "network-shares",
+    "printing",
+    "security",
+    "system-utils",
+    "multimedia"
+  ],
+  "audio_profiles": [
+    "audio",
+    "pipewire",
+    "pulseaudio"
+  ],
+  "default_audio_profile": "pipewire",
+  "desktop_profiles": [
+    "desktop-utils",
+    "networking"
+  ],
+  "desktop_update_profiles": [
+    "update-tools"
+  ],
+  "desktop_update_exclusions": [
+    "kde"
+  ],
+  "feature_profiles": {
+    "multimedia_codecs": [
+      "multimedia"
+    ],
+    "with_offline_repo": [
+      "offline-repo"
+    ],
+    "with_calamares": [
+      "calamares",
+      "filesystems"
+    ],
+    "with_debian_installer": [
+      "filesystems"
+    ]
+  },
+  "firmware_profiles": [
+    "firmware"
+  ],
+  "feature_packages": {
+    "with_flathub": [
+      "flatpak"
+    ]
+  },
+  "distro_packages": {
+    "devuan": [
+      "devuan-keyring"
+    ]
+  },
+  "filesystem_packages": {
+    "btrfs": [
+      "btrfs-progs"
+    ],
+    "f2fs": [
+      "f2fs-tools"
+    ],
+    "xfs": [
+      "xfsprogs"
+    ]
+  },
+  "kernel_aliases": {
+    "kernel-rt": "rt"
+  },
+  "tmpfs": {
+    "min_gib": 4,
+    "max_gib": 16,
+    "memory_fraction": 0.75
+  },
+  "required_tools": {
+    "iso_debian_live": [
+      "apt-ftparchive"
+    ],
+    "default": [
+      "tar"
+    ],
+    "formats": {
+      "tarball": [
+        "tar",
+        "xz"
+      ],
+      "iso": [
+        "xorriso",
+        "grub-mkstandalone",
+        "mcopy",
+        "mmd",
+        "mkfs.vfat"
+      ],
+      "netboot": [
+        "tar",
+        "gzip"
+      ]
+    },
+    "iso_live": [
+      "mksquashfs"
+    ],
+    "disk": [
+      "truncate",
+      "mke2fs",
+      "mkfs.fat",
+      "mcopy",
+      "parted",
+      "qemu-img",
+      "grub-mkstandalone",
+      "grub-install",
+      "losetup"
+    ],
+    "bootloaders": {
+      "syslinux": [
+        "extlinux"
+      ]
+    },
+    "compressors": {
+      "xz": "xz",
+      "gzip": "gzip",
+      "gz": "gzip",
+      "lz4": "lz4",
+      "zstd": "zstd"
+    },
+    "filesystems": {
+      "btrfs": [
+        "mkfs.btrfs"
+      ],
+      "f2fs": [
+        "mkfs.f2fs",
+        "sload.f2fs"
+      ],
+      "xfs": [
+        "mkfs.xfs"
+      ]
+    }
+  },
+  "package_aliases": {
+    "network-manager-gnome": {
+      "forky": [
+        "network-manager-applet",
+        "nm-connection-editor"
+      ],
+      "testing": [
+        "network-manager-applet",
+        "nm-connection-editor"
+      ],
+      "sid": [
+        "network-manager-applet",
+        "nm-connection-editor"
+      ],
+      "freia": [
+        "network-manager-applet",
+        "nm-connection-editor"
+      ],
+      "ceres": [
+        "network-manager-applet",
+        "nm-connection-editor"
+      ]
+    },
+    "fastfetch": {
+      "bookworm": [
+        "neofetch"
+      ],
+      "daedalus": [
+        "neofetch"
+      ]
+    },
+    "libsmbclient": {
+      "trixie": [
+        "libsmbclient0"
+      ],
+      "excalibur": [
+        "libsmbclient0"
+      ],
+      "forky": [
+        "libsmbclient0"
+      ],
+      "testing": [
+        "libsmbclient0"
+      ],
+      "sid": [
+        "libsmbclient0"
+      ],
+      "freia": [
+        "libsmbclient0"
+      ],
+      "ceres": [
+        "libsmbclient0"
+      ]
+    },
+    "p7zip-full": {
+      "forky": [
+        "7zip"
+      ],
+      "testing": [
+        "7zip"
+      ],
+      "sid": [
+        "7zip"
+      ],
+      "freia": [
+        "7zip"
+      ],
+      "ceres": [
+        "7zip"
+      ]
+    },
+    "xserver-xorg-video-vmware": {
+      "forky": [],
+      "testing": [],
+      "freia": []
+    }
+  }
+}

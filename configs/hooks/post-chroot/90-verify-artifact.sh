@@ -1,30 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-echo "=================================================="
-echo "⚓ [POST-CHROOT HOOK] Verifying Binary Artifacts"
-echo "=================================================="
-
-OUTPUT_DIR="./output"
-if [ ! -d "$OUTPUT_DIR" ]; then
-    OUTPUT_DIR="."
+# The orchestrator supplies the artifact from this build, including custom paths.
+artifact="${DEB_DEV_ARTIFACT:?missing artifact path}"
+if [ ! -f "$artifact" ] || [ ! -s "$artifact" ]; then
+    echo "Artifact missing or empty: $artifact" >&2
+    exit 1
 fi
 
-echo "Scanning artifacts in: $OUTPUT_DIR"
-for art in "$OUTPUT_DIR"/*.iso "$OUTPUT_DIR"/*.img "$OUTPUT_DIR"/*.qcow2 "$OUTPUT_DIR"/*.tar* "$OUTPUT_DIR"/*.xz; do
-    if [ -f "$art" ]; then
-        SIZE=$(du -h "$art" | awk "{print \$1}")
-        BASENAME=$(basename "$art")
-        echo "  Found artifact: $BASENAME ($SIZE)"
-
-        # Check checksums
-        if [ -f "${art}.sha256" ]; then
-            echo "    SHA256 checksum file: present"
-        fi
-        if [ -f "${art}.md5" ]; then
-            echo "    MD5 checksum file: present"
-        fi
-    fi
-done
-
-echo "Binary phase verification complete."
+printf 'Artifact verified: %s\n' "$artifact"
+# Final checksums and the package manifest are generated after this phase.

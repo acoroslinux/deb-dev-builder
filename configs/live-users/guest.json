@@ -1,6 +1,7 @@
 {
   "live_user": {
     "name": "guest",
+    "password": "guest",
     "groups": ["audio", "video"]
   }
 }

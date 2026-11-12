@@ -1,3 +1,3 @@
 {
-  "packages": ["e2fsprogs", "btrfs-progs", "xfsprogs", "dosfstools", "ntfs-3g", "exfat-fuse"]
+  "packages": ["e2fsprogs", "btrfs-progs", "xfsprogs", "f2fs-tools", "dosfstools", "ntfs-3g", "exfat-fuse"]
 }

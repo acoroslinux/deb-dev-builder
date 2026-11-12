@@ -1,3 +1,19 @@
 {
-  "packages": ["waybar", "rofi", "swaylock", "swayidle", "mako-notifier", "grim", "slurp", "wl-clipboard"]
+  "packages": [
+    "waybar",
+    "rofi",
+    "swaylock",
+    "swayidle",
+    "mako-notifier",
+    "grim",
+    "slurp",
+    "wl-clipboard",
+    "dbus-x11",
+    "xwayland",
+    "qtwayland5",
+    "qt6-wayland",
+    "console-setup",
+    "kbd",
+    "xkb-data"
+  ]
 }

@@ -1,18 +1,41 @@
-# Build Hooks
+# Build hooks
 
-Optional shell hook scripts are grouped into 3 canonical phases under `configs/hooks/`:
+All project hooks live here, in exactly three phases:
 
-1. **`pre-chroot`**: Runs natively on the host at the beginning of the build process (before rootfs bootstrap/debootstrap).
-2. **`chroot`**: Runs inside the chroot environment at the end of rootfs construction, after packages are installed and system configuration is complete.
-3. **`post-chroot`**: Runs natively on the host in the binary phase after SquashFS and ISO/disk image generation.
+```text
+configs/hooks/
+├── pre-chroot/   # Host: before preparing the toolchain and rootfs
+├── chroot/       # Target: after packages and customization, before packaging
+└── post-chroot/  # Host: after creating the artifact, before final checksums
+```
 
-## Execution Rules
+Place executable `*.sh` scripts directly inside the relevant directory. They
+run in filename order, so use numeric prefixes such as `10-`, `20-`, `30-`.
+Nested directories and unknown phases are rejected. Hidden files, non-executable
+files and symlinks to scripts are not run. A failing script stops the build.
 
-- Only executable, non-symlink `*.sh` files are run, in alphabetical order.
-- In-chroot hooks (`chroot/`) are copied to `/tmp/` inside the rootfs, executed within the isolated chroot, and cleaned up automatically.
-- Environment variables provided:
-  - `TARGET_ROOT`: Absolute path to target rootfs (on host).
-  - `CHROOT_PATH`: Path to chroot rootfs.
-  - `BUILD_ARCH`: Architecture being built (e.g. `amd64`).
-  - `BUILD_DESKTOP`: Desktop environment profile (e.g. `xfce`).
-  - `HOOK_PHASE`: Name of the active hook phase (`pre-chroot`, `chroot`, `post-chroot`).
+For example, add `chroot/40-my-customization.sh` and run:
+
+```bash
+chmod +x configs/hooks/chroot/40-my-customization.sh
+```
+
+Host hooks run from the project root. Chroot scripts run against `/`, with
+`/proc`, `/sys` and `/dev` mounted. The executor stages a temporary copy under
+target `/tmp` and removes it afterwards; source scripts are never modified.
+
+Common environment variables:
+
+- `TARGET_ROOT`, `CHROOT_PATH`: target rootfs path on the host. Inside chroot use `/`.
+- `BUILD_ARCH`, `BUILD_DESKTOP`: selected architecture and desktop.
+- `HOOK_PHASE`: `pre-chroot`, `chroot` or `post-chroot`.
+- `DEB_DEV_ARTIFACT`: current artifact's absolute path in `post-chroot`.
+
+The bundled scripts check the host environment, clean/rebuild caches, sanitize
+machine identity and SSH host keys, and verify the current artifact. Resource
+unmounting and build-directory cleanup are handled by the builder even on failure.
+
+Settings live under `hooks` in `../global_build.json`. `--hooks-dir PATH` selects
+an alternative root with the same three-phase layout; `--no-hooks` disables hooks.
+Mock mode does not execute scripts. See [the manual](../../docs/hooks.md) for the
+full execution context and installer-only builds.

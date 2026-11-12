@@ -1,0 +1,120 @@
+{
+  "packages": [
+    "cryptsetup",
+    "cryptsetup-bin",
+    "cryptsetup-initramfs",
+    "lvm2"
+  ],
+  "init_packages": {
+    "systemd": [
+      "systemd-cryptsetup"
+    ]
+  },
+  "package_suites": {
+    "systemd-cryptsetup": [
+      "trixie",
+      "forky",
+      "sid"
+    ]
+  },
+  "formats": [
+    "iso"
+  ],
+  "installer_features": [
+    "with_calamares",
+    "with_debian_installer"
+  ],
+  "initramfs_update": [
+    "update-initramfs",
+    "-u",
+    "-k",
+    "all"
+  ],
+  "initramfs_list": [
+    "lsinitramfs"
+  ],
+  "initramfs_extract": [
+    "unmkinitramfs"
+  ],
+  "early_unlock_options": [
+    "x-initrd.attach"
+  ],
+  "early_unlock_option": "initramfs",
+  "early_unlock_ancestor_command": ["lsblk", "-s", "-n", "-r", "-o", "TYPE,NAME"],
+  "early_unlock_resolve_command": ["findfs"],
+  "fstab": "etc/fstab",
+  "initramfs_glob": "boot/initrd.img-*",
+  "required_boot_files": [
+    "etc/fstab",
+    "boot/grub/grub.cfg"
+  ],
+  "grub_config": "boot/grub/grub.cfg",
+  "forbidden_kernel_options": [
+    "boot=live",
+    "boot=casper"
+  ],
+  "validation_log": "var/log/installer/deb-dev-validation.log",
+  "cryptsetup_config": {
+    "path": "etc/cryptsetup-initramfs/conf-hook",
+    "line": "CRYPTSETUP=y"
+  },
+  "crypttab": "etc/crypttab",
+  "crypttab_initramfs_path": "cryptroot/crypttab",
+  "initramfs_path_aliases": {
+    "usr/sbin/lvm": [
+      "sbin/lvm"
+    ],
+    "usr/lib/udev/rules.d/56-lvm.rules": [
+      "lib/udev/rules.d/56-lvm.rules"
+    ],
+    "usr/lib/udev/rules.d/69-lvm.rules": [
+      "lib/udev/rules.d/69-lvm.rules"
+    ]
+  },
+  "required_initramfs_paths": {
+    "cryptsetup-initramfs": [
+      "scripts/local-top/cryptroot"
+    ],
+    "lvm2": [
+      "usr/sbin/lvm",
+      "usr/lib/udev/rules.d/56-lvm.rules",
+      "usr/lib/udev/rules.d/69-lvm.rules"
+    ]
+  },
+  "keyfile_unlock": {
+    "key_file": "/crypto_keyfile.bin",
+    "embedded_directory": "cryptroot/keyfiles",
+    "initramfs_config": "etc/initramfs-tools/conf.d/zz-deb-dev-keyfile",
+    "mode": "0600",
+    "umask": "0077",
+    "boot_source_command": [
+      "findmnt",
+      "-n",
+      "-o",
+      "SOURCE",
+      "--target"
+    ],
+    "ancestor_types_command": [
+      "lsblk",
+      "-s",
+      "-n",
+      "-r",
+      "-o",
+      "TYPE"
+    ],
+    "resolve_source_command": [
+      "findfs"
+    ],
+    "verify_key_command": [
+      "cryptsetup",
+      "open",
+      "--test-passphrase"
+    ]
+  },
+  "initramfs_excludes": [
+    "*.bak",
+    "*.old",
+    "*.new",
+    "*.dpkg-*"
+  ]
+}

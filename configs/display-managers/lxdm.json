@@ -1,0 +1,11 @@
+{
+  "binaries": [
+    "usr/sbin/lxdm"
+  ],
+  "service": "lxdm",
+  "pam_service": "lxdm-autologin",
+  "executable": "/usr/sbin/lxdm",
+  "files": {
+    "etc/lxdm/lxdm.conf": "[base]\nautologin={live_user}\nsession={session}\n\n[server]\n[display]\n[input]\n"
+  }
+}

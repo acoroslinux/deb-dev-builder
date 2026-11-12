@@ -3,6 +3,20 @@
     "desktop-base",
     "synaptic",
     "lsb-release",
-    "xdg-user-dirs-gtk"
+    "xdg-user-dirs-gtk",
+    "dbus",
+    "dbus-x11",
+    "polkitd",
+    "pkexec",
+    "udisks2",
+    "upower",
+    "gvfs",
+    "gvfs-backends",
+    "gvfs-fuse",
+    "xdg-utils",
+    "xdg-user-dirs",
+    "fonts-dejavu-core",
+    "xdg-desktop-portal",
+    "xdg-desktop-portal-gtk"
   ]
 }

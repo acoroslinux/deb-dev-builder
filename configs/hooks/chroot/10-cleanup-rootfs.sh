@@ -24,7 +24,7 @@ fi
 if command -v apt-get >/dev/null 2>&1; then
     echo "  Cleaning APT cache..."
     apt-get clean 2>/dev/null || true
-    rm -rf /var/lib/apt/lists/* 2>/dev/null || true
+    # ChrootCleaner controls index removal through cleanup.apt_lists.
 fi
 
 if command -v xbps-remove >/dev/null 2>&1; then

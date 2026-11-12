@@ -1,0 +1,24 @@
+{
+  "desktop": "lxde",
+  "display_manager": "lightdm",
+  "session_type": "x11",
+  "packages": [
+    "lxde",
+    "lightdm",
+    "lightdm-gtk-greeter",
+    "lxpolkit",
+    "xfce4-power-manager",
+    "light-locker"
+  ],
+  "supported_suites": [
+    "bookworm",
+    "trixie",
+    "forky",
+    "sid",
+    "daedalus",
+    "excalibur",
+    "freia",
+    "ceres",
+    "testing"
+  ]
+}

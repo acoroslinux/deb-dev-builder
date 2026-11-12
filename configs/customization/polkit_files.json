@@ -1,0 +1,4 @@
+{
+  "etc/polkit-1/rules.d/10-enable-power-actions.rules": "polkit.addRule(function(action, subject) {\n    if (action.id.indexOf('org.freedesktop.login1.') === 0 ||\n        action.id.indexOf('org.freedesktop.upower.') === 0 ||\n        action.id.indexOf('org.gnome.SessionManager.') === 0 ||\n        action.id.indexOf('org.freedesktop.consolekit.') === 0) {\n        return polkit.Result.YES;\n    }\n});\n",
+  "etc/polkit-1/rules.d/20-synaptic-live-user.rules": "polkit.addRule(function(action, subject) {\n    if (action.id === 'com.ubuntu.pkexec.synaptic' &&\n        subject.active && subject.local && subject.isInGroup('@@ADMIN_GROUP@@')) {\n        return polkit.Result.YES;\n    }\n});\n"
+}

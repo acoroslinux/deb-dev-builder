@@ -1,4 +1,10 @@
 {
   "init_system": "openrc",
-  "packages": ["openrc", "elogind"]
+  "packages": [
+    "openrc",
+    "elogind",
+    "libpam-elogind"
+  ],
+  "live_config_package": "live-config-sysvinit",
+  "zram_package": "zram-tools"
 }

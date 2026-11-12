@@ -3,6 +3,8 @@ import json
 import re
 import shutil
 import subprocess
+from datetime import datetime, timezone
+from uuid import uuid4
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from deb_dev_builder.core.chroot_manager import ChrootManager
@@ -13,10 +15,14 @@ from deb_dev_builder.core.iso_engine import ISOEngine
 from deb_dev_builder.core.disk_engine import DiskEngine
 from deb_dev_builder.core.container_engine import ContainerEngine
 from deb_dev_builder.core.config_loader import ConfigLoader
-from deb_dev_builder.core.path_utils import resolve_from_project, safe_remove_tree, unmount_all_under, mountpoints_under
+from deb_dev_builder.core.path_utils import resolve_from_project, resolve_output_path, safe_remove_tree, unmount_all_under, mountpoints_under
 from deb_dev_builder.core.chroot_cleaner import ChrootCleaner
 from deb_dev_builder.core.hook_manager import HookManager
 import logging
+from deb_dev_builder.core.runtime_config import load_runtime, architecture_settings, merge_settings, installer_storage_packages
+from deb_dev_builder.core.package_policy import installed_packages, live_removals
+from deb_dev_builder.core.build_report import write_build_report
+from .installer_audit import audit_installer_root
 
 logger = logging.getLogger("orchestrator")
 
@@ -28,29 +34,29 @@ class BuildOrchestratorError(Exception):
 class BuildOrchestrator:
     def __init__(
         self,
-        arch: str = "amd64",
+        arch: Optional[str] = None,
         config_path: str = "configs/global_build.json",
         distro: Optional[str] = None,
         init_system: Optional[str] = None,
         desktop: Optional[str] = None,
         kernel: Optional[str] = None,
         bootloader: Optional[str] = None,
-        fs_type: str = "ext4",
+        fs_type: Optional[str] = None,
         variant: Optional[str] = None,
         package_profiles: Optional[List[str]] = None,
         service_profiles: Optional[List[str]] = None,
         repo_profiles: Optional[List[str]] = None,
         live_profile: Optional[str] = None,
-        output_format: str = "iso",
-        mode: str = "mock",
-        clean: bool = True,
+        output_format: Optional[str] = None,
+        mode: Optional[str] = None,
+        clean: Optional[bool] = None,
         fast_mode: bool = False,
         use_tmpfs: bool = False,
         generate_manifest: bool = True,
         with_calamares: bool = False,
         with_debian_installer: bool = False,
         preseed: Optional[str] = None,
-        di_mode: str = "live",
+        di_mode: Optional[str] = None,
         use_seed: bool = True,
         recreate_seed: bool = False,
         multimedia_codecs: bool = False,
@@ -68,30 +74,37 @@ class BuildOrchestrator:
         hardware_profile: Optional[str] = None,
         vm_profile: Optional[str] = None,
     ):
-        self.arch = arch
+        self.loader = ConfigLoader()
+        global_data = self.loader.load_json(resolve_from_project(config_path))
+        self.runtime = load_runtime(global_data)
+        policy = self.runtime["build"]
+        distro_data = self.loader.load_profile("system", distro) if distro else {}
+        self.base_distro = distro_data.get("base_distro", self.runtime["system"]["base_distro"])
+        arch = arch or self.runtime["cli"]["architecture"]
+        self.arch = self.runtime["architecture_aliases"].get(arch, arch)
         self.config_path = config_path
         self.distro = distro
-        self.init_system = init_system or ("sysvinit" if str(distro).startswith("devuan-") else "systemd")
+        self.init_system = init_system or policy["init_systems"].get(self.base_distro, policy["default_init_system"])
         self.desktop = desktop
         self.kernel = kernel
         self._bootloader_was_explicit = bootloader is not None
         self.bootloader = bootloader
-        self.fs_type = fs_type
+        self.fs_type = fs_type or self.runtime["cli"]["filesystem"]
         self.variant = variant
-        self.package_profiles = package_profiles or []
+        self.package_profiles = list(package_profiles or [])
         self.service_profiles = service_profiles or []
         self.repo_profiles = repo_profiles or []
         self.live_profile = live_profile
-        self.output_format = output_format.lower()
-        self.mode = mode.lower()
-        self.clean = clean
+        self.output_format = (output_format or self.runtime["cli"]["format"]).lower()
+        self.mode = (mode or self.runtime["cli"]["mode"]).lower()
+        self.clean = self.runtime["cli"]["clean"] if clean is None else clean
         self.fast_mode = fast_mode
         self.use_tmpfs = use_tmpfs
         self.generate_manifest = generate_manifest
         self.with_calamares = with_calamares
         self.with_debian_installer = with_debian_installer
         self.preseed = preseed
-        self.di_mode = di_mode.lower()
+        self.di_mode = (di_mode or self.runtime["cli"]["di_mode"]).lower()
         self.use_seed = use_seed
         self.recreate_seed = recreate_seed
         self.multimedia_codecs = multimedia_codecs
@@ -109,56 +122,33 @@ class BuildOrchestrator:
         self.hardware_profile = hardware_profile
         self.vm_profile = vm_profile
 
-        # A desktop live image should be useful immediately after boot. Keep
-        # these defaults scoped to that use case so minimal/server/iot builds
-        # remain small and predictable.
-        if self.variant == "live" and self.desktop:
-            audio_profiles = {"audio", "pipewire", "pulseaudio"}
-            for profile in (
-                "filesystems", "networking", "network-shares", "printing",
-                "security", "system-utils", "multimedia",
-            ):
+        def add_profiles(profiles):
+            for profile in profiles:
                 if profile not in self.package_profiles:
                     self.package_profiles.append(profile)
-            if not audio_profiles.intersection(self.package_profiles):
-                self.package_profiles.append("pipewire")
 
-        # Graphical builds should provide a reliable native package manager;
-        # non-graphical/server images do not need the GTK application.
-        if self.desktop and "desktop-utils" not in self.package_profiles:
-            self.package_profiles.append("desktop-utils")
-
-        # GTK desktops benefit from a tray update indicator and PackageKit
-        # integration. KDE provides its own Discover workflow, so avoid
-        # pulling duplicate update frontends there.
-        if self.desktop and str(self.desktop).lower() != "kde" and "update-tools" not in self.package_profiles:
-            self.package_profiles.append("update-tools")
-
-        # --- SMART BOOTLOADER DEFAULTS ---
+        if self.variant == "live" and self.desktop:
+            add_profiles(policy["live_desktop_profiles"])
+            if not set(policy["audio_profiles"]).intersection(self.package_profiles):
+                add_profiles([policy["default_audio_profile"]])
+        if self.desktop:
+            if not set(policy["audio_profiles"]).intersection(self.package_profiles):
+                add_profiles([policy["default_audio_profile"]])
+            add_profiles(policy["desktop_profiles"])
+            if self.desktop.lower() not in policy["desktop_update_exclusions"]:
+                add_profiles(policy["desktop_update_profiles"])
+        for feature, profiles in policy["feature_profiles"].items():
+            if getattr(self, feature, False):
+                add_profiles(profiles)
+        if self.output_format in policy["bootable_formats"] and self.di_mode != "netinstall":
+            add_profiles(policy["firmware_profiles"])
         if not self.bootloader:
-            if self.output_format == "iso" and self.arch in {"amd64", "x86_64", "i386", "i686"}:
-                self.bootloader = {"type": "grub2-hybrid"}
-            else:
-                self.bootloader = {"type": "grub2-uefi"}
-                
-        # We don't inject extra packages here because debian uses package profiles
-        # But we could ensure grub-efi is installed.
-        # ---------------------------------
-
-        if self.multimedia_codecs and "multimedia" not in self.package_profiles:
-            self.package_profiles.append("multimedia")
-        if self.with_offline_repo and "offline-repo" not in self.package_profiles:
-            self.package_profiles.append("offline-repo")
-        if self.with_calamares and "calamares" not in self.package_profiles:
-            self.package_profiles.append("calamares")
-        bootable_formats = {"iso", "img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi"}
-        if self.output_format in bootable_formats and self.di_mode != "netinstall" and "firmware" not in self.package_profiles:
-            self.package_profiles.append("firmware")
+            arch_policy = architecture_settings({"architecture": self.arch}, self.runtime)
+            default_bootloader = policy["iso_bios_bootloader"] if self.output_format == "iso" and arch_policy["bios"] else policy["default_bootloader"]
+            self.bootloader = {"type": default_bootloader}
 
         self.workdir = resolve_from_project(f"workdir/{self.arch}")
         self.target_root = self.workdir / "chroot"
-        self.loader = ConfigLoader()
-
         cfg_file = resolve_from_project(self.config_path)
         self.config = self.loader.assemble_build_config(
             global_config_path=cfg_file,
@@ -182,9 +172,9 @@ class BuildOrchestrator:
                 self.bootloader = hardware_bootloader
         configured_bootloader = self.config.get("bootloader", {})
         configured_type = configured_bootloader.get("type") if isinstance(configured_bootloader, dict) else configured_bootloader
-        selected_bootloader = self.bootloader or configured_type or "grub2-hybrid"
+        selected_bootloader = self.bootloader or configured_type or policy["iso_bios_bootloader"]
         if isinstance(selected_bootloader, dict):
-            selected_bootloader = selected_bootloader.get("type", "grub2-hybrid")
+            selected_bootloader = selected_bootloader.get("type", policy["iso_bios_bootloader"])
         bootloader_config = dict(configured_bootloader) if isinstance(configured_bootloader, dict) else {}
         bootloader_config["type"] = selected_bootloader
         self.config["bootloader"] = bootloader_config
@@ -207,73 +197,83 @@ class BuildOrchestrator:
                 live_user_config = {}
             live_user_config["name"] = self.live_user_name
             self.config["live_user"] = live_user_config
-        if self.with_flathub and "flatpak" not in self.config.get("software", []):
-            self.config.setdefault("software", []).append("flatpak")
-        if str(self.distro).startswith("devuan-") and "devuan-keyring" not in self.config.get("software", []):
-            self.config.setdefault("software", []).append("devuan-keyring")
-
-        init_package = "live-config-systemd" if self.init_system == "systemd" else "live-config-sysvinit"
+        self.runtime = load_runtime(self.config)
+        policy = self.runtime["build"]
+        arch_policy = architecture_settings(self.config, self.runtime)
+        packages = self.config.setdefault("software", [])
+        essential = []
+        storage_policy = policy["installer_storage"]
+        if (self.output_format in storage_policy["formats"] and self.di_mode == "live"
+                and any(getattr(self, feature, False) for feature in storage_policy["installer_features"])):
+            essential.extend(installer_storage_packages(self.config, self.runtime))
+        for feature, extra in policy["feature_packages"].items():
+            if getattr(self, feature, False):
+                essential.extend(extra)
+        essential.extend(policy["distro_packages"].get(self.base_distro, []))
         if self.output_format == "iso":
-            essential_boot_pkgs = ["dosfstools", "mtools"]
+            essential.extend(policy["iso_packages"])
             if self.di_mode != "netinstall":
-                essential_boot_pkgs += ["live-boot", "live-config", init_package]
-            if self.arch in {"amd64", "x86_64"}:
-                essential_boot_pkgs += ["grub-pc-bin", "grub-efi-amd64-bin", "grub-efi-ia32-bin", "isolinux", "syslinux-common"]
-                if str(self.distro).startswith("debian-"):
-                    essential_boot_pkgs.append("shim-signed")
-            elif self.arch in {"i386", "i686"}:
-                essential_boot_pkgs += ["grub-pc-bin", "grub-efi-ia32-bin", "isolinux", "syslinux-common"]
-            elif self.arch in {"aarch64", "arm64"}:
-                essential_boot_pkgs.append("grub-efi-arm64-bin")
-            elif self.arch == "armhf":
-                essential_boot_pkgs.append("grub-efi-arm-bin")
-            elif self.arch == "riscv64":
-                essential_boot_pkgs.append("grub-efi-riscv64-bin")
-        elif self.output_format in {"img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi"}:
-            essential_boot_pkgs = ["dosfstools", "mtools", "initramfs-tools"]
-            if self.init_system == "systemd":
-                essential_boot_pkgs.append("systemd-sysv")
-            if selected_bootloader == "systemd-boot":
-                essential_boot_pkgs.append("systemd-boot")
-            elif "grub" in selected_bootloader:
-                grub_packages = {
-                    "amd64": "grub-efi-amd64-bin", "x86_64": "grub-efi-amd64-bin",
-                    "i386": "grub-efi-ia32-bin", "i686": "grub-efi-ia32-bin",
-                    "aarch64": "grub-efi-arm64-bin", "arm64": "grub-efi-arm64-bin",
-                    "armhf": "grub-efi-arm-bin", "riscv64": "grub-efi-riscv64-bin",
-                }
-                if self.arch in grub_packages:
-                    essential_boot_pkgs.append(grub_packages[self.arch])
-            if self.fs_type == "btrfs":
-                essential_boot_pkgs.append("btrfs-progs")
-            elif self.fs_type == "f2fs":
-                essential_boot_pkgs.append("f2fs-tools")
-            elif self.fs_type == "xfs":
-                essential_boot_pkgs.append("xfsprogs")
-        else:
-            essential_boot_pkgs = []
-        for pkg in essential_boot_pkgs:
-            if pkg not in self.config.get("software", []):
-                self.config.setdefault("software", []).append(pkg)
-
-        if self.arch not in {"amd64", "x86_64", "i386", "i686"}:
-            unsupported_x86_boot = ("grub-pc", "grub-efi-amd64", "grub-efi-ia32", "isolinux", "syslinux", "shim-signed")
-            self.config["software"] = [
-                package for package in self.config.get("software", [])
-                if not package.startswith(unsupported_x86_boot)
-            ]
-        elif self.arch in {"i386", "i686"}:
-            self.config["software"] = [
-                package for package in self.config.get("software", [])
-                if not package.startswith(("grub-efi-amd64", "shim-signed"))
-            ]
+                essential.extend(policy["iso_live_packages"])
+                essential.append(policy["live_config_packages"][self.init_system])
+            essential.extend(arch_policy["iso_packages"])
+            essential.extend(policy["secure_boot_packages"].get(self.base_distro, {}).get(self.arch, []))
+        elif self.output_format in policy["disk_formats"]:
+            essential.extend(policy["disk_packages"])
+            essential.extend(policy["disk_init_packages"].get(self.init_system, []))
+            essential.extend(policy["bootloader_packages"].get(selected_bootloader, []))
+            if "grub" in selected_bootloader:
+                essential.append(arch_policy["disk_grub_package"])
+            essential.extend(policy["filesystem_packages"].get(self.fs_type, []))
+        for package in essential:
+            if package not in packages:
+                packages.append(package)
+        excluded_prefixes = tuple(arch_policy["excluded_package_prefixes"])
+        self.config["software"] = [package for package in packages if not package.startswith(excluded_prefixes)]
 
     def validate(self) -> Dict[str, Any]:
         errors = []
+        arch_policy = architecture_settings(self.config, self.runtime)
+        bootable_suites = arch_policy.get("bootable_suites", {}).get(self.config.get("base_distro"))
+        kernel_flavor = self.kernel or self.runtime["cli"]["kernel"]
+        kernel_flavor = self.runtime["build"]["kernel_aliases"].get(kernel_flavor, kernel_flavor)
+        if (arch_policy.get("kernel_flavors") is not None and self.di_mode == "live"
+                and self.output_format in self.runtime["build"]["bootable_formats"]
+                and kernel_flavor not in arch_policy["kernel_flavors"]):
+            errors.append(f"Kernel flavor '{kernel_flavor}' is unavailable for {self.arch}; choose one of: "
+                          + ", ".join(arch_policy["kernel_flavors"]) + ".")
+        if (bootable_suites is not None
+                and self.output_format in {*self.runtime["build"]["bootable_formats"], "netboot"}
+                and self.config.get("suite") not in bootable_suites):
+            errors.append(
+                f"{self.arch} bootable builds for {self.config.get('base_distro')} require one of: "
+                f"{', '.join(bootable_suites)}. Suite {self.config.get('suite')} has no supported "
+                "native 32-bit kernel/installer; i386 compatibility packages alone are insufficient."
+            )
+        if self.runtime["artifacts"]["iso"]["secure_boot"] == "require" and (
+                self.output_format != "iso" or self.config.get("bootloader_type") not in {"grub2-hybrid", "grub2-uefi"}):
+            errors.append("Required Secure Boot currently needs a GRUB UEFI ISO build.")
+        for rule in self.runtime["build"]["capability_rules"]:
+            if all(self.config.get(key) == value for key, value in rule["when"].items()):
+                if any(self.config.get(key) not in allowed for key, allowed in rule["require"].items()):
+                    errors.append(rule["message"])
+        for source in self.runtime["build"]["packages"]["local_debs"]:
+            if not resolve_from_project(source).is_file():
+                errors.append(f"Local DEB not found: {source}")
+        customization = self.runtime["installer"]["customization"]
+        sources = [entry["source"] for entry in customization["overlays"]] if customization["enabled"] else []
+        sources.extend(entry["source"] for entry in self.runtime["artifacts"]["iso"]["binary_overlays"])
+        for source in sources:
+            if not resolve_from_project(source).is_dir():
+                errors.append(f"Overlay directory not found: {source}")
+        sort_file = self.runtime["artifacts"]["squashfs"]["sort_file"]
+        if sort_file and not resolve_from_project(sort_file).is_file():
+            errors.append(f"SquashFS sort file not found: {sort_file}")
         if not self.distro:
             errors.append("Distro profile not specified.")
-        if self.output_format not in {"iso", "netboot", "img", "raw", "qcow2", "vmdk", "vdi", "vhd", "vhdx", "tarball", "container", "oci"}:
+        if self.output_format not in self.runtime["cli"]["formats"]:
             errors.append(f"Unsupported output format: {self.output_format}")
+        if self.di_mode not in self.runtime["cli"]["di_modes"]:
+            errors.append(f"Unsupported Debian Installer mode: {self.di_mode}")
         if str(self.distro).startswith("devuan-") and self.init_system == "systemd":
             errors.append("Devuan builds cannot use systemd; choose sysvinit, openrc, or runit.")
         supported_suites = self.config.get("supported_suites")
@@ -284,8 +284,14 @@ class BuildOrchestrator:
             )
         if self.di_mode in {"netinstall", "netboot"} and not self.with_debian_installer:
             errors.append(f"Debian Installer mode '{self.di_mode}' requires --with-debian-installer.")
-        if self.with_debian_installer and self.config.get("base_distro") != "debian":
-            errors.append("Official Debian Installer media can only be built from Debian profiles.")
+        if self.with_debian_installer and self.config.get("base_distro") not in self.runtime["installer"]["distributions"]:
+            errors.append("Native d-i media require a Debian or Devuan profile.")
+        if self.with_debian_installer:
+            from .installer_source import init_preseed
+            try:
+                init_preseed(self.config, self.runtime["installer"])
+            except ValueError as exc:
+                errors.append(str(exc))
         if self.with_debian_installer and self.output_format not in {"iso", "netboot"}:
             errors.append("Debian Installer requires ISO or netboot output.")
         if (self.with_offline_repo or self.offline_repo_packages) and self.output_format != "iso":
@@ -328,10 +334,12 @@ class BuildOrchestrator:
         live_user_name = live_user.get("name") if isinstance(live_user, dict) else live_user
         if not isinstance(live_user_name, str) or not _VALID_LOGIN_NAME.fullmatch(live_user_name):
             errors.append("Live user name must be a valid Linux login name.")
+        elif live_user_name == "root":
+            errors.append("The live user cannot be root.")
         if isinstance(live_user, dict) and "password" in live_user:
             password = live_user["password"]
-            if not isinstance(password, str) or "\n" in password or "\r" in password:
-                errors.append("Live user password must be a single-line string.")
+            if not isinstance(password, str) or not password or any(character in password for character in ("\n", "\r", "\0")):
+                errors.append("Live user password must be a non-empty single-line string.")
         if not self.config.get("software"):
             errors.append("No packages were loaded from the selected profiles.")
         return {
@@ -348,6 +356,11 @@ class BuildOrchestrator:
     def build(self, output_name: Optional[str] = None) -> Path:
         if self.mode == "mock":
             return self._build(output_name)
+        live_user = self.config.get("live_user", {})
+        if self.desktop and self.di_mode == "live" and not (isinstance(live_user, dict) and live_user.get("password")):
+            profile = self.live_profile or self.runtime["build"]["default_live_profile"]
+            source = f"configs/live-users/{profile}.json"
+            raise BuildOrchestratorError(f"Desktop builds require live_user.password for login and screen unlocking. Set it in {source}; passwords are read from configuration, never prompted.")
         # Every architecture shares build_host and the cleanup scope. Lock
         # outside workdir before any process can unmount or remove that tree.
         import fcntl
@@ -365,11 +378,45 @@ class BuildOrchestrator:
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)
 
+    def _artifact_output_name(self, output_name: Optional[str] = None) -> str:
+        policy = self.runtime["build"]["artifact_naming"]
+        defaults = policy["defaults"]
+        requested = resolve_output_path(output_name or policy["prefix"], ".iso").with_suffix("")
+        installers = []
+        if self.with_calamares:
+            installers.append(policy["installer_labels"]["calamares"])
+        if self.with_debian_installer or self.di_mode in {"netinstall", "netboot"} or self.output_format == "netboot":
+            installers.append(policy["installer_labels"]["debian_installer"])
+        values = {
+            "prefix": requested.name,
+            "distro": self.distro or defaults["distro"],
+            "image_type": policy["image_types"][self.output_format].format(di_mode=self.di_mode),
+            "architecture": self.arch,
+            "installer": "-".join(installers) or defaults["installer"],
+            "desktop": self.config.get("desktop") or defaults["desktop"],
+            "variant": self.config.get("variant") or defaults["variant"],
+            "init_system": self.init_system,
+            "kernel": self.config.get("kernel") or self.runtime["cli"]["kernel"],
+            "bootloader": self.config["bootloader_type"],
+            "filesystem": self.fs_type,
+            "mode": self.mode,
+            "build_id": datetime.now(timezone.utc).strftime(policy["timestamp_format"]) + "-" + uuid4().hex[:8],
+        }
+        values = {key: re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value)).strip("-") for key, value in values.items()}
+        try:
+            filename = policy["template"].format(**values)
+        except (KeyError, ValueError) as error:
+            raise BuildOrchestratorError(f"Invalid artifact naming template: {error}") from error
+        if not filename or len(filename.encode()) > 230 or not re.fullmatch(r"[a-zA-Z0-9_-]+", filename):
+            raise BuildOrchestratorError("Artifact naming template must produce a safe filename of at most 230 bytes")
+        return str(requested.with_name(filename))
+
     def _build(self, output_name: Optional[str] = None) -> Path:
         validation = self.validate()
         if not validation["valid"]:
             raise BuildOrchestratorError("Invalid build configuration: " + "; ".join(validation["errors"]))
-        name = output_name or f"deb-dev-{self.distro}-{self.arch}"
+        name = self._artifact_output_name(output_name)
+        logger.info("Build artifact name: %s", name)
 
         requested_output = Path(name).expanduser()
         if requested_output.is_absolute() or requested_output.parent != Path("."):
@@ -388,7 +435,8 @@ class BuildOrchestrator:
 
         if getattr(self, "use_tmpfs", False):
             if getattr(self, "mode", "real") == "real" and __import__("os").geteuid() == 0:
-                tmpfs_size = "16G"
+                tmpfs_policy = self.runtime["build"]["tmpfs"]
+                tmpfs_size = f'{tmpfs_policy["max_gib"]}G'
                 try:
                     total_kb = 0
                     with open("/proc/meminfo", "r") as f:
@@ -396,7 +444,7 @@ class BuildOrchestrator:
                             if line.startswith("MemTotal:") or line.startswith("SwapTotal:"):
                                 total_kb += int(line.split()[1])
                     total_gb = total_kb / (1024 * 1024)
-                    safe_gb = max(4, min(16, int(total_gb * 0.75)))
+                    safe_gb = max(tmpfs_policy["min_gib"], min(tmpfs_policy["max_gib"], int(total_gb * tmpfs_policy["memory_fraction"])))
                     tmpfs_size = f"{safe_gb}G"
                 except Exception:
                     pass
@@ -431,25 +479,18 @@ class BuildOrchestrator:
             self.config["fast_mode"] = self.fast_mode
             self.config["use_tmpfs"] = self.use_tmpfs
 
-        required_tools = ["tar", "xz"] if self.output_format == "tarball" else ["tar"]
-        if self.output_format == "iso":
-            required_tools = ["xorriso", "grub-mkstandalone", "mcopy", "mmd", "mkfs.vfat"]
-            if self.di_mode != "netinstall":
-                required_tools.insert(0, "mksquashfs")
-        elif self.output_format == "netboot":
-            required_tools = ["tar", "gzip"]
-        elif self.output_format in {"img", "raw", "qcow2", "vmdk", "vhd", "vhdx", "vdi"}:
-            required_tools = ["truncate", "mke2fs", "mkfs.fat", "mcopy", "parted", "qemu-img", "grub-mkstandalone", "grub-install", "losetup"]
-            if self.config.get("bootloader_type") == "syslinux":
-                required_tools.append("extlinux")
+        tools = self.runtime["build"]["required_tools"]
+        required_tools = list(tools["formats"].get(self.output_format, tools["default"]))
+        if self.output_format == "iso" and self.di_mode != "netinstall":
+            required_tools.extend(tools["iso_live"])
+            if self.with_debian_installer:
+                required_tools.extend(tools["iso_debian_live"])
+        elif self.output_format in self.runtime["build"]["disk_formats"]:
+            required_tools = list(tools["disk"])
+            required_tools.extend(tools["bootloaders"].get(self.config.get("bootloader_type"), []))
             if self.config.get("compression"):
-                compressor = {"xz": "xz", "gzip": "gzip", "lz4": "lz4"}.get(self.config["compression"], "zstd")
-                required_tools.append(compressor)
-            fs_tools = {"btrfs": "mkfs.btrfs", "f2fs": "mkfs.f2fs", "xfs": "mkfs.xfs"}
-            if self.fs_type in fs_tools:
-                required_tools.append(fs_tools[self.fs_type])
-            if self.fs_type == "f2fs":
-                required_tools.append("sload.f2fs")
+                required_tools.append(tools["compressors"][self.config["compression"]])
+            required_tools.extend(tools["filesystems"].get(self.fs_type, []))
 
         toolchain = ToolchainManager(
             workdir_base=self.workdir,
@@ -458,7 +499,7 @@ class BuildOrchestrator:
             target_arch=self.arch,
             distro=self.distro,
             required_tools=required_tools,
-            toolchain_config=self.config.get("toolchain", {}),
+            toolchain_config=merge_settings(self.runtime["toolchain"], self.config.get("toolchain", {})),
         )
         chroot = ChrootManager(self.target_root, self.mode, cache_dir=resolve_from_project(f"cache/{self.arch}"), arch=self.arch)
         artifact = None
@@ -468,13 +509,15 @@ class BuildOrchestrator:
         )
         try:
             hooks.run_stage("pre-chroot")
+            if self.with_debian_installer and self.output_format == 'iso' and self.di_mode == 'live':
+                ISOEngine(self.workdir, self.target_root, name, self.config, self.mode, toolchain).prepare_installer_bundle()
             toolchain.setup()
             # The isolated toolchain must be mounted before bootstrap so that
             # mmdebstrap/debootstrap never executes from the host.
             toolchain.mount_virtual_fs()
             if self.config.get("base_distro") == "devuan":
                 toolchain.install_devuan_keyring()
-                toolchain.ensure_devuan_debootstrap_scripts([self.config.get("suite", "ceres")])
+                toolchain.ensure_devuan_debootstrap_scripts([self.config["suite"]])
             installer_only = self.output_format == "netboot" or self.di_mode == "netinstall"
             if installer_only:
                 iso_engine = ISOEngine(self.workdir, self.target_root, name, self.config, self.mode, toolchain)
@@ -488,22 +531,33 @@ class BuildOrchestrator:
                 self._verify_artifact(artifact)
                 if self.generate_manifest and artifact.exists():
                     self._generate_checksums(artifact, chroot=chroot)
+                write_build_report(artifact, self.config, self.runtime, self.target_root, self.mode, toolchain)
                 self._fix_output_permissions(artifact.parent)
                 return artifact
 
             apt = APTManager(chroot, self.config, toolchain=toolchain)
-            suite = self.config.get("suite", "bookworm")
+            suite = self.config.get("suite", self.runtime["apt"]["suite"])
             apt.bootstrap_rootfs(suite, self.config.get("dpkg_arch", self.arch), use_seed=self.use_seed, recreate_seed=self.recreate_seed, reuse_existing=not self.clean)
             toolchain.mount_virtual_fs()
             chroot.mount_virtual_fs()
             apt.configure_sources_list()
+            local_packages = apt.prepare_package_inputs()
             apt.update_apt_cache()
 
             pkgs = list(self.config.get("software", []))
-            zram_package = "systemd-zram-generator" if self.init_system == "systemd" else "zram-tools"
+            zram_package = self.runtime["build"]["zram_packages"][self.init_system]
             if self.with_zram and zram_package not in pkgs:
                 pkgs.append(zram_package)
-            apt.install_packages(pkgs)
+            package_policy = self.runtime["build"]["packages"]
+            live_candidates = set(package_policy["live_only"])
+            name_of = lambda package: package.split("=", 1)[0].split(":", 1)[0]
+            live_packages = [package for package in pkgs if name_of(package) in live_candidates]
+            live_packages.extend(self.config.get("live_packages", []))
+            apt.install_packages([package for package in pkgs if name_of(package) not in live_candidates] + local_packages)
+            system_inventory = installed_packages(self.target_root)
+            apt.install_packages(list(dict.fromkeys(live_packages)))
+            self.config["live_remove_packages"] = live_removals(system_inventory, installed_packages(self.target_root), package_policy["keep_installed"])
+            self.config["package_inventory_system"] = system_inventory
 
             # Prepare offline package repository if requested
             # The catalog profile is opt-in: merely defining package names
@@ -555,12 +609,23 @@ class BuildOrchestrator:
                 self.config["offline_repo_dir"] = str(offline_repo_dir)
                 self.config["with_offline_repo"] = True
 
+            if self.with_debian_installer and self.di_mode == "live" and self.output_format == "iso":
+                from .installer_source import offline_package_sets
+                package_sets = offline_package_sets(self.config, self.runtime["installer"])
+                if not package_sets:
+                    raise BuildOrchestratorError(f"No offline installer package sets configured for {self.config['dpkg_arch']}")
+                offline_repo_dir = self.workdir / "offline_repo"
+                apt.download_offline_package_sets([*package_sets, installer_storage_packages(self.config, self.runtime)], offline_repo_dir)
+                self.config["offline_repo_dir"] = str(offline_repo_dir)
+                self.config["with_offline_repo"] = True
+
             customizer = SystemCustomizer(chroot, self.config)
             customizer.configure_live_environment()
             
             # DiskEngine builds removable boot files after hooks, without
             # probing the host filesystem or writing firmware NVRAM.
             hooks.run_stage("chroot")
+            apt.remove_package_inputs()
             chroot.umount_virtual_fs()
             unmount_all_under(self.target_root)
             # Some kernels retain descendants of recursive /dev binds after
@@ -580,6 +645,8 @@ class BuildOrchestrator:
             if self.rootfs_cleanup:
                 cleanup_report = ChrootCleaner(self.target_root, self.config).clean()
                 logger.info("Rootfs cleanup removed %d entries", cleanup_report.get("removed", 0))
+            if self.mode != "mock" and self.output_format == "iso":
+                audit_installer_root(self.target_root, self.config, self.runtime, toolchain)
 
             if self.mode != "mock" and not all(
                 (self.target_root / directory).is_dir() for directory in ("etc", "usr")
@@ -605,6 +672,7 @@ class BuildOrchestrator:
             self._verify_artifact(artifact)
             if self.generate_manifest and artifact and artifact.exists():
                 self._generate_checksums(artifact, chroot=chroot)
+            write_build_report(artifact, self.config, self.runtime, self.target_root, self.mode, toolchain)
             self._fix_output_permissions(artifact.parent)
 
             return artifact
@@ -661,15 +729,15 @@ class BuildOrchestrator:
                 for root, dirs, files in os.walk(output_dir):
                     for d in dirs:
                         try:
-                            os.chown(os.path.join(root, d), uid, gid)
+                            os.chown(os.path.join(root, d), uid, gid, follow_symlinks=False)
                         except Exception:
                             pass
                     for f in files:
                         try:
-                            os.chown(os.path.join(root, f), uid, gid)
+                            os.chown(os.path.join(root, f), uid, gid, follow_symlinks=False)
                         except Exception:
                             pass
-                os.chown(output_dir, uid, gid)
+                os.chown(output_dir, uid, gid, follow_symlinks=False)
                 logger.info(f"Updated ownership of {output_dir} to non-root user ({sudo_uid}:{sudo_gid})")
             except Exception as e:
                 logger.warning(f"Could not update output ownership: {e}")

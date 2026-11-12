@@ -1,0 +1,34 @@
+{
+  "desktop": "awesome",
+  "display_manager": "lightdm",
+  "session_type": "x11",
+  "packages": [
+    "awesome",
+    "lightdm",
+    "lightdm-gtk-greeter",
+    "xterm",
+    "rxvt-unicode",
+    "suckless-tools",
+    "thunar",
+    "dex",
+    "dunst",
+    "mate-polkit",
+    "xss-lock",
+    "i3lock",
+    "gnome-keyring",
+    "libpam-gnome-keyring",
+    "menu",
+    "menu-xdg"
+  ],
+  "supported_suites": [
+    "bookworm",
+    "trixie",
+    "forky",
+    "sid",
+    "daedalus",
+    "excalibur",
+    "freia",
+    "ceres",
+    "testing"
+  ]
+}

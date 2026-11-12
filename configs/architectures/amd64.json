@@ -1,4 +1,26 @@
 {
   "arch": "amd64",
-  "dpkg_arch": "amd64"
+  "dpkg_arch": "amd64",
+  "aliases": [
+    "x86_64"
+  ],
+  "kernel_suffix": "amd64",
+  "image": {
+    "efi_target": "x86_64-efi",
+    "efi_filename": "BOOTX64.EFI",
+    "efi_suffix": "x64",
+    "bios": true,
+    "iso_packages": [
+      "grub-pc-bin",
+      "grub-efi-amd64-bin",
+      "grub-efi-ia32-bin",
+      "isolinux",
+      "syslinux-common"
+    ],
+    "disk_grub_package": "grub-efi-amd64-bin",
+    "excluded_package_prefixes": [],
+    "compatibility_efi_architectures": [
+      "i386"
+    ]
+  }
 }

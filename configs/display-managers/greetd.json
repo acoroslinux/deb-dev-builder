@@ -1,0 +1,10 @@
+{
+  "binaries": [
+    "usr/bin/greetd"
+  ],
+  "service": "greetd",
+  "executable": "/usr/bin/greetd",
+  "files": {
+    "etc/greetd/config.toml": "[terminal]\nvt = 1\n\n[default_session]\ncommand = \"{session}\"\nuser = \"{live_user}\"\n\n[initial_session]\ncommand = \"{session}\"\nuser = \"{live_user}\"\n"
+  }
+}

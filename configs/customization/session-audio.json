@@ -1,0 +1,53 @@
+{
+  "enabled": true,
+  "init_systems": [
+    "sysvinit",
+    "openrc",
+    "runit",
+    "s6"
+  ],
+  "required_binaries": [
+    "usr/bin/pipewire",
+    "usr/bin/wireplumber",
+    "usr/bin/pipewire-pulse"
+  ],
+  "launcher": "usr/local/libexec/deb-dev-pipewire-session",
+  "lock_command": [
+    "flock",
+    "--exclusive",
+    "--nonblock"
+  ],
+  "lock_file": "deb-dev-pipewire-session.lock",
+  "environment": {
+    "GIO_USE_VFS": "local"
+  },
+  "autostart_path": "etc/xdg/autostart/deb-dev-pipewire.desktop",
+  "autostart": {
+    "Type": "Application",
+    "Name": "PipeWire Audio",
+    "Exec": "@@LAUNCHER@@",
+    "TryExec": "/usr/bin/pipewire",
+    "Terminal": "false",
+    "NoDisplay": "true",
+    "X-GNOME-Autostart-Phase": "Initialization",
+    "X-GNOME-Autostart-enabled": "true"
+  },
+  "processes": [
+    [
+      "/usr/bin/pipewire"
+    ],
+    [
+      "/usr/bin/wireplumber"
+    ],
+    [
+      "/usr/bin/pipewire-pulse"
+    ]
+  ],
+  "readiness_command": [
+    "test",
+    "-S",
+    "@@RUNTIME@@/pipewire-0"
+  ],
+  "readiness_attempts": 50,
+  "readiness_interval": "0.1"
+}

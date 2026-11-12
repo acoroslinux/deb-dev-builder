@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- GTK appearance and Xfwm window frames are configured independently. -->
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="theme" type="string" value="Default"/>
+    <property name="borderless_maximize" type="bool" value="false"/>
+    <property name="titleless_maximize" type="bool" value="false"/>
+  </property>
+</channel>

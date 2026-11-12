@@ -1,0 +1,31 @@
+{
+  "iso_mask": {
+    "systemd": [
+      "systemd-firstboot.service"
+    ]
+  },
+  "live_mask": {
+    "systemd": [
+      "NetworkManager-wait-online.service",
+      "systemd-networkd-wait-online.service",
+      "winbind.service"
+    ]
+  },
+  "auto_enable": [
+    "NetworkManager",
+    "smbd",
+    "nmbd",
+    "avahi-daemon",
+    "cups",
+    "cups-browsed",
+    "dbus",
+    "bluetooth",
+    "elogind"
+  ],
+  "aliases": {
+    "NetworkManager": "network-manager"
+  },
+  "openrc_runlevel": "default",
+  "runit_source": "etc/sv",
+  "runit_target": "etc/service"
+}

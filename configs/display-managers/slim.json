@@ -1,0 +1,10 @@
+{
+  "binaries": [
+    "usr/bin/slim"
+  ],
+  "service": "slim",
+  "executable": "/usr/bin/slim",
+  "files": {
+    "etc/slim.conf": "default_user        {live_user}\nauto_login          yes\nlogin_cmd           exec /bin/sh - ~/.xinitrc {session}\n"
+  }
+}

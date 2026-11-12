@@ -1,0 +1,45 @@
+{
+  "theme_file": "boot/grub/themes/deb-dev-modern/theme.txt",
+  "defaults_file": "etc/default/grub",
+  "settings": {
+    "GRUB_DEFAULT": "0",
+    "GRUB_TIMEOUT_STYLE": "menu",
+    "GRUB_TIMEOUT": 5,
+    "GRUB_DISTRIBUTOR": "Deb-Dev Modern",
+    "GRUB_CMDLINE_LINUX": "",
+    "GRUB_GFXMODE": "auto",
+    "GRUB_GFXPAYLOAD_LINUX": "keep",
+    "GRUB_TERMINAL_OUTPUT": "gfxterm",
+    "GRUB_DISABLE_SUBMENU": false,
+    "GRUB_DISABLE_RECOVERY": false,
+    "GRUB_DISABLE_OS_PROBER": false,
+    "GRUB_SAVEDEFAULT": false
+  },
+  "iso_source": "configs/custom_files/boot/grub/themes/deb-dev-modern",
+  "iso_activation": "insmod gfxterm\ninsmod png\nset gfxmode=auto\nterminal_output gfxterm\nset theme=/{theme_file}\n\n",
+  "kernel_parameters_key": "GRUB_CMDLINE_LINUX_DEFAULT",
+  "kernel_parameters": [
+    "quiet"
+  ],
+  "plymouth_parameters": [
+    "splash"
+  ],
+  "theme_key": "GRUB_THEME",
+  "header": [
+    "GRUB configuration managed by Deb-Dev Builder.",
+    "Defaults: configs/customization/grub.json.",
+    "Installer storage options and additional kernel arguments are preserved.",
+    "After manual changes run update-grub."
+  ],
+  "installer_hook": "usr/lib/finish-install.d/14zy-deb-dev-grub",
+  "update_command": [
+    "update-grub"
+  ],
+  "calamares_config": "etc/calamares/modules/grubcfg.conf",
+  "calamares": {
+    "overwrite": true,
+    "prefer_grub_d": false,
+    "keep_distributor": false,
+    "always_use_defaults": true
+  }
+}

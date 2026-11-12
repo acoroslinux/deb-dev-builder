@@ -130,3 +130,35 @@ def mountpoints_under(target_dir: str | Path) -> list[str]:
             pass
 
     return list(dict.fromkeys(mounts))
+
+
+def rootfs_destination(root: str | Path, relative: str | Path, *, follow_leaf: bool = False) -> Path:
+    """Resolve rootfs symlinks, leaving the leaf replaceable unless requested."""
+    root = Path(root).resolve()
+    pending = list(Path(relative).parts)
+    if Path(relative).is_absolute():
+        raise ValueError('Rootfs destinations must be relative')
+    resolved = []
+    links = 0
+    while pending:
+        part = pending.pop(0)
+        if part in ('', '.'):
+            continue
+        if part == '..':
+            if not resolved:
+                raise ValueError('Rootfs destination escapes the target root')
+            resolved.pop()
+            continue
+        candidate = root.joinpath(*resolved, part)
+        if (pending or follow_leaf) and candidate.is_symlink():
+            links += 1
+            if links > 40:
+                raise ValueError('Too many rootfs directory symlinks')
+            target = candidate.readlink()
+            if target.is_absolute():
+                resolved = []
+                target = target.relative_to('/')
+            pending = list(target.parts) + pending
+        else:
+            resolved.append(part)
+    return root.joinpath(*resolved)

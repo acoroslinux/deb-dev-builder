@@ -1,0 +1,9 @@
+{
+  "source_file": "etc/apt/sources.list.d/offline-iso.list",
+  "main_source_file": "etc/apt/sources.list",
+  "sources_directory": "etc/apt/sources.list.d",
+  "installer_backup_directory": "etc/apt/deb-dev-installer-sources",
+  "restored_marker": "var/lib/deb-dev-builder/apt-sources-restored",
+  "live_uri": "file:/run/live/medium/repo/",
+  "entry_template": "# Offline live ISO repository\ndeb [trusted=yes] {uri} ./\n"
+}

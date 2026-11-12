@@ -5,6 +5,7 @@ import shlex
 from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
+from deb_dev_builder.core.runtime_config import load_runtime, architecture_settings
 from deb_dev_builder.core.path_utils import resolve_output_path
 
 logger = logging.getLogger("disk_engine")
@@ -20,16 +21,19 @@ class DiskEngine:
         self.config = config
         self.mode = mode
         self.toolchain = toolchain
+        self.runtime = load_runtime(config)
+        self.policy = self.runtime["artifacts"]["disk"]
+        self.arch_policy = architecture_settings(config, self.runtime)
 
     def _calculate_image_size(self, rootfs: Path) -> int:
         if self.mode == "mock":
             return 1024
         out = subprocess.check_output(["du", "-sm", str(rootfs)])
-        return int(out.split()[0]) + 600
+        return int(out.split()[0]) + self.policy["root_slack_mib"]
 
     def _inject_boot_artifacts(self, image: Path) -> None:
         hardware = self.config.get("hardware", {})
-        reserved_end = hardware.get("partition_start_mib", 1) * 1024 * 1024
+        reserved_end = hardware.get("partition_start_mib", self.policy["partition_start_mib"]) * 1024 * 1024
         ranges = []
         for entry in hardware.get("boot_artifacts", []):
             source = self.target_root / entry["source"].lstrip("/")
@@ -108,7 +112,7 @@ class DiskEngine:
                 __import__('shutil').copytree(offline_repo_dir, target_repo, dirs_exist_ok=True)
 
         rootfs_size = self._calculate_image_size(self.target_root)
-        partition_start = self.config.get("hardware", {}).get("partition_start_mib", 1)
+        partition_start = self.config.get("hardware", {}).get("partition_start_mib", self.policy["partition_start_mib"])
 
         efi_img = self.workdir / "efi.img"
         root_img = self.workdir / "root.img"
@@ -117,7 +121,7 @@ class DiskEngine:
         # Ensure target root has autorelabel
         (self.target_root / ".autorelabel").touch()
 
-        fs_type = self.config.get("fs_type", "ext4")
+        fs_type = self.config.get("fs_type", self.runtime["cli"]["filesystem"])
 
         # Build root image directly from directory
         if self.toolchain:
@@ -146,9 +150,9 @@ class DiskEngine:
                 subprocess.run(["mke2fs", "-t", "ext4", "-L", "ROOTFS", "-d", str(self.target_root), str(root_img)], check=True)
 
         # Update rootfs_size because mkfs.btrfs -r dynamically expands the file size!
-        rootfs_size = (root_img.stat().st_size // (1024 * 1024)) + 10
-        efi_size = self.config.get("bootloader", {}).get("efi_size", 300)
-        total_size = rootfs_size + efi_size + partition_start + 3
+        rootfs_size = (root_img.stat().st_size // (1024 * 1024)) + self.policy["root_extra_mib"]
+        efi_size = self.config.get("bootloader", {}).get("efi_size", self.policy["efi_size_mib"])
+        total_size = rootfs_size + efi_size + partition_start + self.policy["partition_slack_mib"]
         bios = self._uses_bios()
         root_end = f"{total_size - 2}MiB" if bios else "100%"
 
@@ -203,7 +207,7 @@ class DiskEngine:
         if requested_format not in {"img", "raw"}:
             vm_out = resolve_output_path(self.output_name, f".{requested_format}")
             logger.info(f"Converting raw disk image to VM format: {target_format}...")
-            qemu_format = {"vhd": "vpc"}.get(requested_format, requested_format)
+            qemu_format = self.policy["qemu_formats"].get(requested_format, requested_format)
             if self.toolchain:
                 self.toolchain.run_in_build_host(["qemu-img", "convert", "-f", "raw", "-O", qemu_format, str(out_path), str(vm_out)], check=True)
             else:
@@ -228,16 +232,16 @@ class DiskEngine:
 
         final_path = out_path
         if compression == "xz":
-            cmd = ["xz", "-z9", "-T0", "-f", str(out_path)]
+            cmd = ["xz", f'-z{self.policy["compression_levels"]["xz"]}', "-T0", "-f", str(out_path)]
             final_path = Path(f"{out_path}.xz")
         elif compression == "gz" or compression == "gzip":
-            cmd = ["gzip", "-9", "-f", str(out_path)]
+            cmd = ["gzip", f'-{self.policy["compression_levels"]["gzip"]}', "-f", str(out_path)]
             final_path = Path(f"{out_path}.gz")
         elif compression == "lz4":
             final_path = Path(f"{out_path}.lz4")
-            cmd = ["lz4", "-9", "-f", "--rm", str(out_path), str(final_path)]
+            cmd = ["lz4", f'-{self.policy["compression_levels"]["lz4"]}', "-f", "--rm", str(out_path), str(final_path)]
         else: # zstd
-            zstd_level = "-3" if self.config.get("fast_mode", False) else "-19"
+            zstd_level = f'-{self.policy["compression_levels"]["zstd_fast" if self.config.get("fast_mode", False) else "zstd"]}'
             cmd = ["zstd", zstd_level, "-f", "-T0", "-q", "--rm", str(out_path)]
             final_path = Path(f"{out_path}.zst")
 
@@ -266,7 +270,7 @@ class DiskEngine:
         efi_boot_dir = self.workdir / "efi_tmp" / "EFI" / "BOOT"
         efi_boot_dir.mkdir(parents=True, exist_ok=True)
 
-        bootloader_type = self.config.get("bootloader", {}).get("type", "grub2-hybrid")
+        bootloader_type = self.config.get("bootloader", {}).get("type", self.runtime["build"]["iso_bios_bootloader"])
         platform_boot = bootloader_type.startswith("u-boot") or bootloader_type == "asahi"
         wants_efi = bootloader_type != "grub2-bios"
 
@@ -277,18 +281,18 @@ class DiskEngine:
         boot_dir = self.target_root / "boot"
         vmlinuz, initrd = self._kernel_files()
 
-        kernel_params = self.config.get("boot", {}).get("kernel_params", "quiet")
-        live_options = {"boot=live", "components", "union=overlay", "rd.live.image"}
+        kernel_params = self.config.get("boot", {}).get("kernel_params", self.policy["kernel_params"])
+        live_options = self.policy["live_kernel_options"]
         kernel_params = " ".join(p for p in kernel_params.split()
                                  if p not in live_options and not p.startswith("root="))
-        arch = self.config.get("dpkg_arch", self.config.get("architecture", "amd64"))
-        arch = {"x86_64": "amd64", "aarch64": "arm64", "i686": "i386"}.get(arch, arch)
-        efi_arch = {"amd64": "x64", "i386": "ia32", "arm64": "aa64", "armhf": "arm", "riscv64": "riscv64"}.get(arch)
+        arch = self.config.get("architecture") or self.config.get("dpkg_arch") or self.runtime["cli"]["architecture"]
+        arch = self.runtime["architecture_aliases"].get(arch, arch)
+        efi_arch = self.arch_policy["efi_suffix"]
         if not platform_boot and efi_arch is None:
             raise DiskEngineError(f"Unsupported UEFI architecture: {arch}")
 
         if bootloader_type == "syslinux":
-            if arch not in {"amd64", "i386"} or self.config.get("fs_type", "ext4") != "ext4":
+            if not self.arch_policy["bios"] or self.config.get("fs_type", self.runtime["cli"]["filesystem"]) != "ext4":
                 raise DiskEngineError("Syslinux disk output requires x86 and an ext4 root filesystem")
             syslinux = self.target_root / "boot/syslinux"
             syslinux.mkdir(parents=True, exist_ok=True)
@@ -388,10 +392,8 @@ menuentry "Debian Linux" {{
             root_config.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(grub_cfg, root_config)
             if wants_efi and not bootx64.is_file():
-                targets = {"amd64": "x86_64-efi", "i386": "i386-efi", "arm64": "arm64-efi",
-                           "armhf": "arm-efi", "riscv64": "riscv64-efi"}
-                command = ["grub-mkstandalone", "-O", targets[arch],
-                           "-d", f"/usr/lib/grub/{targets[arch]}",
+                command = ["grub-mkstandalone", "-O", self.arch_policy["efi_target"],
+                           "-d", f"/usr/lib/grub/{self.arch_policy["efi_target"]}",
                            "-o", str(bootx64), f"boot/grub/grub.cfg={grub_cfg}"]
                 runner = self.toolchain.run_in_build_host if self.toolchain else subprocess.run
                 runner(command, check=True)
@@ -402,9 +404,8 @@ menuentry "Debian Linux" {{
                 raise DiskEngineError(f"No removable UEFI bootloader was installed in {efi_boot_dir}")
 
     def _uses_bios(self) -> bool:
-        architecture = self.config.get("dpkg_arch", self.config.get("architecture", "amd64"))
-        return (architecture in {"amd64", "x86_64", "i386", "i686"}
-                and self.config.get("bootloader", {}).get("type", "grub2-hybrid") in {"grub2-bios", "grub2-hybrid"})
+        return (self.arch_policy["bios"]
+                and self.config.get("bootloader", {}).get("type", self.runtime["build"]["iso_bios_bootloader"]) in {"grub2-bios", "grub2-hybrid"})
 
     def _install_bios_bootloader(self, image: Path) -> None:
         """Install against the actual image's root partition, never the host disk."""
@@ -454,7 +455,7 @@ root_mounted=1
         lines = fstab.read_text().splitlines() if fstab.is_file() else []
         lines = [line for line in lines if line.lstrip().startswith("#")
                  or len(line.split()) < 2 or line.split()[1] not in {"/", "/boot/efi"}]
-        fs_type = self.config.get("fs_type", "ext4")
+        fs_type = self.config.get("fs_type", self.runtime["cli"]["filesystem"])
         lines += [f"LABEL=ROOTFS / {fs_type} defaults 0 {2 if fs_type == 'ext4' else 0}",
                   "LABEL=EFI /boot/efi vfat defaults,umask=0077 0 2"]
         fstab.write_text("\n".join(lines) + "\n")

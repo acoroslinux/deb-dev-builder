@@ -9,7 +9,10 @@
     "lightdm-gtk-greeter",
     "xfce4-terminal",
     "xfce4-power-manager",
-    "xfce4-notifyd"
+    "xfce4-notifyd",
+    "gnome-themes-extra",
+    "thunar-volman",
+    "light-locker"
   ],
   "exclude_packages": [
     "polkit-kde-agent-1",
@@ -17,5 +20,38 @@
     "ukui-polkit",
     "lomiri-polkit-agent",
     "systemsettings"
-  ]
+  ],
+  "distribution_overrides": {
+    "devuan": {
+      "exclude_packages": [
+        "mate-polkit",
+        "lxpolkit"
+      ]
+    },
+    "debian": {
+      "packages": [
+        "mate-polkit"
+      ]
+    },
+    "devuan-5": {
+      "packages": [
+        "policykit-1-gnome"
+      ]
+    },
+    "devuan-6": {
+      "packages": [
+        "xfce-polkit"
+      ]
+    },
+    "devuan-testing": {
+      "packages": [
+        "xfce-polkit"
+      ]
+    },
+    "devuan-ceres": {
+      "packages": [
+        "xfce-polkit"
+      ]
+    }
+  }
 }

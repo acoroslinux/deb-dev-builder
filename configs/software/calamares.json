@@ -1,5 +1,9 @@
 {
   "packages": [
-    "calamares"
+    "calamares",
+    "plymouth-label",
+    "cryptsetup",
+    "cryptsetup-bin",
+    "cryptsetup-initramfs"
   ]
 }

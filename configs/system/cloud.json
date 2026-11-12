@@ -1,3 +1,7 @@
 {
-  "kernel": "cloud"
+  "kernel": "cloud",
+  "package_templates": [
+    "linux-image-cloud-{suffix}",
+    "linux-headers-cloud-{suffix}"
+  ]
 }

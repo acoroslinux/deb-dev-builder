@@ -3,10 +3,14 @@ import json
 import hashlib
 import shutil
 import subprocess
+import shlex
+import tempfile
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import logging
+from deb_dev_builder.core.runtime_config import load_runtime
 from deb_dev_builder.core.chroot_manager import ChrootManager
+from deb_dev_builder.core.path_utils import resolve_from_project
 
 logger = logging.getLogger("apt_manager")
 
@@ -19,6 +23,7 @@ class APTManager:
         self.config = config
         self.target_root = chroot.target_root
         self.toolchain = toolchain
+        self.runtime = load_runtime(config)
 
     def resolve_cache_dir(self) -> Path:
         arch = getattr(self.chroot, "arch", "amd64")
@@ -58,7 +63,7 @@ class APTManager:
             metadata = json.loads(marker.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return False
-        return metadata.get("suite") == suite and metadata.get("arch") == arch
+        return metadata == self._bootstrap_identity(suite, arch)
 
     def _base_files_is_installed(self) -> bool:
         """Return whether dpkg records the required base-files package."""
@@ -72,7 +77,13 @@ class APTManager:
 
     def _write_bootstrap_marker(self, suite: str, arch: str) -> None:
         marker = self.target_root / ".deb-dev-builder-bootstrap.json"
-        marker.write_text(json.dumps({"suite": suite, "arch": arch}, sort_keys=True) + "\n", encoding="utf-8")
+        marker.write_text(json.dumps(self._bootstrap_identity(suite, arch), sort_keys=True) + "\n", encoding="utf-8")
+
+    def _bootstrap_identity(self, suite, arch):
+        return {"suite": suite, "arch": arch,
+                "distro": self.config.get("base_distro", self.config.get("distro")),
+                "mirror": self.config.get("mirror", self.runtime["apt"]["mirror"]),
+                "components": sorted(self.config.get("components", self.runtime["apt"]["components"]))}
 
     @staticmethod
     def _sha256(path: Path) -> str:
@@ -105,9 +116,9 @@ class APTManager:
                 old_source.unlink()
 
         # Read configuration directly from the loaded distro profile
-        mirror = self.config.get("mirror", "http://deb.debian.org/debian")
-        suite = self.config.get("suite", "bookworm")
-        components = self.config.get("components", ["main", "contrib", "non-free-firmware"])
+        mirror = self.config.get("mirror", self.runtime["apt"]["mirror"])
+        suite = self.config.get("suite", self.runtime["apt"]["suite"])
+        components = self.config.get("components", self.runtime["apt"]["components"])
         if not isinstance(components, list) or not components or not all(isinstance(c, str) and c for c in components):
             raise APTManagerError("Repository components must be a non-empty list of strings")
         if not mirror or not suite:
@@ -234,9 +245,9 @@ class APTManager:
         elif use_seed and not recreate_seed and seed_cache.exists():
             logger.warning("Ignoring unverified rootfs seed cache: %s", seed_cache)
 
-        mirror = self.config.get("mirror", "http://deb.debian.org/debian")
+        mirror = self.config.get("mirror", self.runtime["apt"]["mirror"])
         suite = configured_suite
-        components = ",".join(self.config.get("components", ["main", "contrib", "non-free-firmware"]))
+        components = ",".join(self.config.get("components", self.runtime["apt"]["components"]))
         is_devuan = str(self.config.get("distro", "")).startswith("devuan-")
         devuan_keyring = next((path for path in (
             Path("/usr/share/keyrings/devuan-archive-keyring.gpg"),
@@ -410,6 +421,65 @@ class APTManager:
         self.sync_cache_to_target()
         self.chroot.run_in_chroot(["apt-get", "update", "-y"], env={"DEBIAN_FRONTEND": "noninteractive"})
 
+    def prepare_package_inputs(self):
+        """Register multiarch and a temporary local APT repository in the target."""
+        policy = self.runtime["build"]["packages"]
+        if self.chroot.mode == "mock":
+            return []
+        if policy["build_only_sources"]:
+            source = self.target_root / policy["build_sources_path"]
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("\n".join(policy["build_only_sources"]) + "\n")
+        for arch in policy["foreign_architectures"]:
+            self.chroot.run_in_chroot(["dpkg", "--add-architecture", arch])
+        if not policy["local_debs"]:
+            return []
+        if self.toolchain is None:
+            raise APTManagerError("Local DEB indexing requires an isolated toolchain")
+        destination = self.target_root / policy["local_repository"]
+        if not destination.resolve().is_relative_to(self.target_root.resolve()):
+            raise APTManagerError("Local repository escapes the target rootfs")
+        marker = destination / ".deb-dev-local-repository"
+        if destination.exists():
+            if not marker.is_file():
+                raise APTManagerError(f"Refusing to overwrite an unmanaged local repository: {destination}")
+            shutil.rmtree(destination)
+        destination.mkdir(parents=True, exist_ok=True)
+        marker.touch()
+        names = []
+        for source in policy["local_debs"]:
+            source = resolve_from_project(source)
+            if not source.is_file() or source.suffix != ".deb":
+                raise APTManagerError(f"Local DEB not found: {source}")
+            archive = destination / (self._sha256(source) + ".deb")
+            shutil.copy2(source, archive)
+            relative = "/" + archive.relative_to(self.target_root).as_posix()
+            probe = self.chroot.run_in_chroot(["dpkg-deb", "-f", relative, "Package", "Architecture"],
+                                              capture_output=True, text=True)
+            fields = dict(line.split(": ", 1) for line in probe.stdout.splitlines() if ": " in line)
+            if fields.get("Architecture") not in {"all", self.config.get("dpkg_arch", self.chroot.arch), *policy["foreign_architectures"]}:
+                raise APTManagerError(f"Local DEB architecture is not enabled: {source}")
+            if not fields.get("Package"):
+                raise APTManagerError(f"Invalid local DEB metadata: {source}")
+            names.append(fields["Package"] + (":" + fields["Architecture"] if fields["Architecture"] != "all" else ""))
+        self.toolchain.run_in_build_host(["/bin/sh", "-ec",
+            f"cd {shlex.quote(str(destination))} && apt-ftparchive packages . > Packages && apt-ftparchive release . > Release"])
+        source = self.target_root / policy["local_source"]
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(f"deb [trusted=yes] file:/{policy['local_repository']} ./\n")
+        return names
+
+    def remove_package_inputs(self):
+        """Do not publish the temporary local-repository source in the live OS."""
+        if self.chroot.mode == "mock":
+            return
+        policy = self.runtime["build"]["packages"]
+        (self.target_root / policy["local_source"]).unlink(missing_ok=True)
+        (self.target_root / policy["build_sources_path"]).unlink(missing_ok=True)
+        destination = self.target_root / policy["local_repository"]
+        if policy["local_debs"] and (destination / ".deb-dev-local-repository").is_file():
+            shutil.rmtree(destination)
+
     def install_packages(self, packages: List[str]):
 
         # Optimize apt for speed
@@ -438,7 +508,10 @@ class APTManager:
 
         self.sync_cache_to_target()
 
-        cmd = ["apt-get", "install", "-y"] + real_pkgs
+        cmd = ["apt-get"]
+        if self.config.get("apt_target_release"):
+            cmd.extend(["-t", self.config["apt_target_release"]])
+        cmd.extend(["install", "-y", *real_pkgs])
         res = self.chroot.run_in_chroot(cmd, check=False, env={"DEBIAN_FRONTEND": "noninteractive", "NEEDRESTART_MODE": "a"})
         if res.returncode != 0:
             raise APTManagerError(f"APT package installation failed with exit code {res.returncode}")
@@ -488,6 +561,60 @@ class APTManager:
         self.create_repository_metadata(dest_dir)
         return dest_dir
 
+    def download_offline_package_sets(self, package_sets: List[List[str]], dest_dir: Path) -> Path:
+        """Resolve full dependency closures, even for already-installed packages.
+
+        EFI and BIOS GRUB metapackages conflict, so resolve each set separately
+        against an empty status database without installing anything in the live
+        rootfs. Only the resolver's selected archives enter the repository.
+        """
+        dest_dir = Path(dest_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        if self.chroot.mode == "mock":
+            self.create_repository_metadata(dest_dir)
+            return dest_dir
+        temp_root = self.target_root / "tmp"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        cache = self.resolve_cache_dir() / "archives"
+        cache.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="deb-dev-offline-", dir=temp_root) as directory:
+            temporary = Path(directory)
+            temporary.chmod(0o755)
+            status = temporary / "status"
+            status.touch()
+            for number, packages in enumerate(package_sets):
+                if not packages:
+                    continue
+                archives = temporary / str(number)
+                archives.mkdir()
+                guest_status = "/" + status.relative_to(self.target_root).as_posix()
+                guest_archives = "/" + archives.relative_to(self.target_root).as_posix()
+                command = ["apt-get", "-o", f"Dir::State::status={guest_status}", "-o", f"Dir::Cache::archives={guest_archives}", "-o", "Debug::NoLocking=true", "--no-install-recommends", "--download-only", "-y"]
+                plan = self.chroot.run_in_chroot([*command, "--print-uris", "install", *packages], check=True, capture_output=True, text=True)
+                selected = []
+                for line in plan.stdout.splitlines():
+                    if not line.startswith("'"):
+                        continue
+                    fields = shlex.split(line)
+                    if len(fields) < 3 or Path(fields[1]).name != fields[1] or not fields[1].endswith(".deb"):
+                        raise APTManagerError(f"Invalid archive in offline dependency plan: {line}")
+                    filename = fields[1]
+                    selected.append(filename)
+                    cached = cache / filename
+                    if cached.is_file():
+                        shutil.copy2(cached, archives / filename)
+                if not selected:
+                    raise APTManagerError(f"Empty offline dependency plan for {', '.join(packages)}")
+                self.chroot.run_in_chroot([*command, "install", *packages], check=True)
+                for filename in selected:
+                    archive = archives / filename
+                    if not archive.is_file() or not archive.stat().st_size:
+                        raise APTManagerError(f"Offline dependency archive missing: {filename}")
+                    shutil.copy2(archive, dest_dir / filename)
+                    shutil.copy2(archive, cache / filename)
+        self.create_repository_metadata(dest_dir)
+        return dest_dir
+
     def create_repository_metadata(self, repo_dir: Path):
         import gzip
         from email.utils import formatdate
@@ -499,12 +626,14 @@ class APTManager:
             return
 
         packages_file = repo_dir / "Packages"
-        if shutil.which("dpkg-scanpackages"):
+        if self.toolchain is not None:
+            self.toolchain.run_in_build_host(["/bin/sh", "-c", f"cd {shlex.quote(str(repo_dir))} && apt-ftparchive packages . > Packages"], check=True)
+        elif shutil.which("dpkg-scanpackages"):
             res = subprocess.run(["dpkg-scanpackages", ".", "/dev/null"], cwd=str(repo_dir), capture_output=True, text=True, check=False)
             if res.returncode == 0:
                 packages_file.write_text(res.stdout)
         elif shutil.which("apt-ftparchive"):
-            res = subprocess.run(["apt-ftparchive", "software", "."], cwd=str(repo_dir), capture_output=True, text=True, check=False)
+            res = subprocess.run(["apt-ftparchive", "packages", "."], cwd=str(repo_dir), capture_output=True, text=True, check=False)
             if res.returncode == 0:
                 packages_file.write_text(res.stdout)
 

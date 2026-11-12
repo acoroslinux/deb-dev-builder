@@ -1,0 +1,22 @@
+{
+  "desktop": "enlightenment",
+  "display_manager": "lightdm",
+  "session_type": "x11",
+  "packages": [
+    "enlightenment",
+    "lightdm",
+    "lightdm-gtk-greeter",
+    "terminology"
+  ],
+  "supported_suites": [
+    "bookworm",
+    "trixie",
+    "forky",
+    "sid",
+    "daedalus",
+    "excalibur",
+    "freia",
+    "ceres",
+    "testing"
+  ]
+}

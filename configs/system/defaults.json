@@ -1,0 +1,8 @@
+{
+  "base_distro": "debian",
+  "init_system": "systemd",
+  "fallback_locales": [
+    "en_US.UTF-8"
+  ],
+  "hosts_template": "127.0.0.1   localhost\n127.0.1.1   {hostname}.localdomain {hostname}\n::1         localhost ip6-localhost ip6-loopback\n"
+}

@@ -1,6 +1,1 @@
-{
-  "live_user": {
-    "name": "liveuser",
-    "groups": ["sudo", "audio", "video", "plugdev", "netdev"]
-  }
-}
+{}

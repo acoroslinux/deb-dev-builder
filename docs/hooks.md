@@ -1,11 +1,11 @@
 # Build hooks
 
-Build hooks use the existing three directories under `configs/hooks/`:
+Build hooks live only under `configs/hooks/`, in three flat directories:
 
 | Directory | Execution point | Environment |
 |---|---|---|
 | `pre-chroot` | Before toolchain setup and rootfs bootstrap | Host |
-| `chroot` | After package installation, customization and bootloader setup, before unmounting | Target chroot |
+| `chroot` | After package installation and rootfs customization, before unmounting and packaging | Target chroot |
 | `post-chroot` | After artifact creation, before final checksums and workdir cleanup | Host |
 
 Only executable, non-hidden, non-symlink `*.sh` files run, in alphabetical
@@ -14,7 +14,9 @@ the executor. Missing phase directories are skipped without creating them.
 Host hooks use the project root as their working directory. Target hooks run
 with `/proc`, `/sys` and `/dev` mounted, using a unique temporary `.sh` file
 inside target `/tmp`; each temporary copy is removed on success or failure.
-Existing files with the source script name are preserved.
+Existing files with the source script name are preserved. Unknown phase
+directories and nested hook directories are rejected before any hook runs;
+put numbered `.sh` files directly inside the appropriate phase.
 
 A non-zero hook exit stops the build. Resource unmounting and configured workdir
 cleanup remain in the orchestrator's `finally` block; they do not depend on
@@ -25,7 +27,6 @@ Use `--hooks-dir PATH` to select another root with the same three-directory
 layout, or `--no-hooks` to disable all hooks. Relative roots are resolved from
 the project root. The default is `hooks.directory = "configs/hooks"` in
 `configs/global_build.json`; `hooks.enabled = false` also disables hooks.
-The old `chroot_directory` setting is no longer part of the configuration.
 
 All three phases receive `TARGET_ROOT`, `CHROOT_PATH`, `BUILD_ARCH`,
 `BUILD_DESKTOP` and `HOOK_PHASE`. Root paths describe the absolute target
@@ -40,12 +41,13 @@ Installer-only netinstall and netboot builds run the two host phases and skip
 run all three phases. Final checksums are generated after `post-chroot` so
 changes made by a hook are included.
 
-The scripts already supplied in `configs/hooks` keep their own behavior. In
-particular, the chroot cleanup script removes APT lists regardless of the
-built-in cleaner's `cleanup.apt_lists` option. The post-chroot script lists
-artifacts in the default output directory; it is not a checksum validator.
-The orchestrator separately rejects missing or empty real-build artifacts.
+The bundled chroot scripts clean package caches, rebuild desktop caches and
+sanitize machine identity, SSH host keys and shell histories. The cleanup script
+removes APT lists regardless of the built-in cleaner's `cleanup.apt_lists` option.
+The post-chroot script verifies only `DEB_DEV_ARTIFACT`, the artifact produced by
+the current build, including custom output paths. Checksums are generated after
+this phase; the hook does not scan old artifacts from previous builds.
 
-The legacy `hooks/` tree is no longer discovered by the build pipeline. No
-`<phase>.d` directories are required. Custom hooks for that layout must be
-placed in the appropriate one of the three phases under the configured root.
+To add a hook, create (for example) `configs/hooks/chroot/40-my-customization.sh`
+and make it executable with `chmod +x`. There is no second hook root in the
+repository and no extra phase directories to configure.

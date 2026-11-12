@@ -8,6 +8,71 @@ import pytest
 from deb_dev_builder.core.toolchain_manager import ToolchainManager, ToolchainManagerError
 
 
+@pytest.mark.parametrize("repaired", [True, False])
+def test_setup_upgrades_old_cache_before_using_new_build_tools(tmp_path, monkeypatch, repaired):
+    manager = ToolchainManager(tmp_path / "work" / "amd64", mode="real", required_tools=["apt-ftparchive"], toolchain_config={"packages": ["apt-utils"], "foreign_architectures": []})
+    events = []
+    status = manager.build_host_dir / "var/lib/dpkg/status"
+    binary = manager.build_host_dir / "usr/bin/apt-ftparchive"
+    def restore():
+        events.append("restore")
+        for relative in ("etc/os-release", "usr/bin/apt-get", "usr/bin/xorriso", "var/lib/dpkg/status"):
+            path = manager.build_host_dir / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("")
+    def mount():
+        events.append("mount")
+        manager.is_mounted = True
+    def unmount():
+        events.append("unmount")
+        manager.is_mounted = False
+    def run(command, check=True):
+        assert check
+        events.append(command)
+        if command[:2] == ["apt-get", "install"] and repaired:
+            binary.write_text("tool")
+            status.write_text("Package: apt-utils\nArchitecture: amd64\nStatus: install ok installed\n")
+    monkeypatch.setattr(manager, "restore_toolchain_tarball", restore)
+    monkeypatch.setattr(manager, "mount_virtual_fs", mount)
+    monkeypatch.setattr(manager, "umount_virtual_fs", unmount)
+    monkeypatch.setattr(manager, "run_in_build_host", run)
+    monkeypatch.setattr(manager, "cache_build_host", lambda: events.append("cache"))
+    if repaired:
+        manager.setup()
+        assert "cache" in events
+        assert events.index(["apt-get", "install", "-y", "apt-utils"]) < events.index("cache")
+    else:
+        with pytest.raises(ToolchainManagerError, match="apt-ftparchive"):
+            manager.setup()
+        assert "cache" not in events
+    assert events[0] == "restore"
+    assert ["apt-get", "update"] in events
+    assert events[-1] == "unmount"
+
+
+def test_up_to_date_toolchain_needs_no_network_or_remount(tmp_path, monkeypatch):
+    manager = ToolchainManager(tmp_path / "work" / "amd64", mode="real", required_tools=["apt-ftparchive"], toolchain_config={"packages": ["apt-utils"]})
+    binary = manager.build_host_dir / "usr/bin/apt-ftparchive"
+    binary.parent.mkdir(parents=True)
+    binary.write_text("tool")
+    status = manager.build_host_dir / "var/lib/dpkg/status"
+    status.parent.mkdir(parents=True)
+    status.write_text("Package: apt-utils\nArchitecture: amd64\nStatus: install ok installed\n")
+    def unexpected(*args, **kwargs):
+        pytest.fail("An up-to-date toolchain must be reused without APT/network operations")
+    monkeypatch.setattr(manager, "run_in_build_host", unexpected)
+    monkeypatch.setattr(manager, "mount_virtual_fs", unexpected)
+    manager.ensure_build_dependencies()
+
+
+def test_build_dependencies_distinguish_architecture_and_unconfigured_packages(tmp_path):
+    manager = ToolchainManager(tmp_path / "work" / "amd64", toolchain_config={"packages": ["tool:arm64", "broken", "tool:amd64"]})
+    status = manager.build_host_dir / "var/lib/dpkg/status"
+    status.parent.mkdir(parents=True)
+    status.write_text("Package: tool\nArchitecture: arm64\nStatus: install ok installed\n\nPackage: broken\nArchitecture: amd64\nStatus: install ok unpacked\n")
+    assert manager._missing_build_packages() == ["broken", "tool:amd64"]
+
+
 def test_toolchain_unmounts_nested_bind_mounts_before_parents(tmp_path, monkeypatch):
     manager = ToolchainManager(tmp_path / "work" / "amd64", mode="real")
     manager.build_host_dir.mkdir(parents=True)

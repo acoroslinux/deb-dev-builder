@@ -1,0 +1,5 @@
+{
+  "path": "etc/samba/smb.conf",
+  "binary": "usr/sbin/smbd",
+  "content": "[global]\n   workgroup = WORKGROUP\n   server string = Deb-Dev-Builder\n   server role = standalone server\n   security = user\n   map to guest = Bad User\n   obey pam restrictions = yes\n   unix extensions = yes\n   min protocol = SMB2\n   mdns name = mdns\n   load printers = no\n   printing = cups\n\n[homes]\n   comment = Home Directories\n   browseable = no\n   read only = no\n   valid users = %S\n"
+}

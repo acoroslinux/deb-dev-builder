@@ -1,0 +1,25 @@
+{
+  "desktop": "labwc",
+  "display_manager": "sddm",
+  "session_type": "wayland",
+  "packages": [
+    "labwc",
+    "sddm",
+    "foot",
+    "pcmanfm",
+    "mate-polkit",
+    "dex",
+    "gnome-keyring",
+    "libpam-gnome-keyring",
+    "xdg-desktop-portal-wlr"
+  ],
+  "supported_suites": [
+    "trixie",
+    "forky",
+    "sid",
+    "excalibur",
+    "freia",
+    "ceres",
+    "testing"
+  ]
+}

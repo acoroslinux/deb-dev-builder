@@ -1,0 +1,29 @@
+{
+  "desktop": "ukui",
+  "display_manager": "lightdm",
+  "session_type": "x11",
+  "packages": [
+    "ukui-session-manager",
+    "ukui-panel",
+    "ukui-polkit",
+    "ukui-screensaver",
+    "ukui-settings-daemon",
+    "ukui-power-manager",
+    "ukui-control-center",
+    "ukui-menu",
+    "ukui-notification-daemon",
+    "ukwm",
+    "peony",
+    "lightdm",
+    "lightdm-gtk-greeter",
+    "xterm",
+    "gnome-keyring",
+    "libpam-gnome-keyring"
+  ],
+  "supported_suites": [
+    "bookworm",
+    "forky",
+    "testing",
+    "sid"
+  ]
+}

@@ -1,0 +1,69 @@
+# A compact GTK2 theme for the native d-i frontend and its bundled engine.
+# Do not force fonts here: gtk-set-font manages language coverage and zoom.
+style "deb-dev-base"
+{
+    xthickness = 2
+    ythickness = 2
+    GtkWidget::focus-line-width = 2
+    GtkWidget::focus-padding = 1
+    GtkButton::default-border = { 1, 1, 1, 1 }
+    GtkButton::inner-border = { 7, 7, 4, 4 }
+    GtkCheckButton::indicator-size = 16
+    GtkRange::slider-width = 16
+    GtkScrollbar::min-slider-length = 30
+    GtkTreeView::vertical-separator = 4
+    GtkTreeView::horizontal-separator = 6
+    GtkExpander::expander-size = 16
+
+    fg[NORMAL] = "#172b46"
+    fg[PRELIGHT] = "#10243d"
+    fg[ACTIVE] = "#172b46"
+    fg[SELECTED] = "#ffffff"
+    fg[INSENSITIVE] = "#778395"
+    bg[NORMAL] = "#f0f4f9"
+    bg[PRELIGHT] = "#e0edf9"
+    bg[ACTIVE] = "#d7e3f0"
+    bg[SELECTED] = "#285d8a"
+    bg[INSENSITIVE] = "#e9eef5"
+    base[NORMAL] = "#ffffff"
+    base[PRELIGHT] = "#edf5fc"
+    base[ACTIVE] = "#d9e7f4"
+    base[SELECTED] = "#285d8a"
+    base[INSENSITIVE] = "#edf1f6"
+    text[NORMAL] = "#172b46"
+    text[PRELIGHT] = "#172b46"
+    text[ACTIVE] = "#172b46"
+    text[SELECTED] = "#ffffff"
+    text[INSENSITIVE] = "#778395"
+
+    engine "clearlooks"
+    {
+        animation = FALSE
+    }
+}
+
+style "deb-dev-button" = "deb-dev-base"
+{
+    xthickness = 3
+    ythickness = 3
+    bg[NORMAL] = "#e2eaf5"
+    bg[PRELIGHT] = "#cbdff3"
+    bg[ACTIVE] = "#b9d2eb"
+}
+
+style "deb-dev-entry" = "deb-dev-base"
+{
+    xthickness = 3
+    ythickness = 3
+}
+
+style "deb-dev-progress" = "deb-dev-base"
+{
+    bg[SELECTED] = "#087ca7"
+    fg[PRELIGHT] = "#ffffff"
+}
+
+class "GtkWidget" style "deb-dev-base"
+class "GtkButton" style "deb-dev-button"
+class "GtkEntry" style "deb-dev-entry"
+class "GtkProgressBar" style "deb-dev-progress"

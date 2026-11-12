@@ -1,0 +1,22 @@
+{
+  "kernel_params": "",
+  "required_kernel_options": [
+    "boot=live",
+    "components",
+    "union=overlay"
+  ],
+  "hidden_kernel_options": [],
+  "plymouth_kernel_options": ["quiet", "splash"],
+  "keymap": "us",
+  "secure_boot": "auto",
+  "binary_overlays": [],
+  "signed_loaders": {
+    "x86_64-efi": {"shim": "usr/lib/shim/shimx64.efi.signed", "grub": "usr/lib/grub/x86_64-efi-signed/gcdx64.efi.signed", "grub_filename": "grubx64.efi", "mok": "usr/lib/shim/mmx64.efi.signed", "mok_filename": "mmx64.efi"},
+    "i386-efi": {"shim": "usr/lib/shim/shimia32.efi.signed", "grub": "usr/lib/grub/i386-efi-signed/gcdia32.efi.signed", "grub_filename": "grubia32.efi", "mok": "usr/lib/shim/mmia32.efi.signed", "mok_filename": "mmia32.efi"},
+    "arm64-efi": {"shim": "usr/lib/shim/shimaa64.efi.signed", "grub": "usr/lib/grub/arm64-efi-signed/gcdaa64.efi.signed", "grub_filename": "grubaa64.efi", "mok": "usr/lib/shim/mmaa64.efi.signed", "mok_filename": "mmaa64.efi"}
+  },
+  "checksum_algorithms": ["md5", "sha256"],
+  "checksum_excludes": ["isolinux/isolinux.bin", "boot/boot.bin", "boot/grub/stage2_eltorito", "boot/grub/grub_eltorito", "*sum.txt"],
+  "efi_min_mib": 32,
+  "efi_slack_mib": 16
+}

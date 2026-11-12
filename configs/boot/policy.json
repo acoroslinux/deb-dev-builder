@@ -1,0 +1,64 @@
+{
+  "disk_formats": [
+    "img",
+    "raw",
+    "qcow2",
+    "vmdk",
+    "vhd",
+    "vhdx",
+    "vdi"
+  ],
+  "bootable_formats": [
+    "iso",
+    "img",
+    "raw",
+    "qcow2",
+    "vmdk",
+    "vhd",
+    "vhdx",
+    "vdi"
+  ],
+  "default_bootloader": "grub2-uefi",
+  "iso_bios_bootloader": "grub2-hybrid",
+  "iso_packages": [
+    "dosfstools",
+    "mtools"
+  ],
+  "iso_live_packages": [
+    "live-boot",
+    "live-config"
+  ],
+  "disk_packages": [
+    "dosfstools",
+    "mtools",
+    "initramfs-tools"
+  ],
+  "disk_init_packages": {
+    "systemd": [
+      "systemd-sysv"
+    ]
+  },
+  "bootloader_packages": {
+    "systemd-boot": [
+      "systemd-boot"
+    ]
+  },
+  "secure_boot_packages": {
+    "debian": {
+      "amd64": [
+        "shim-signed"
+      ]
+    }
+  },
+  "bootloader_aliases": {
+    "grub2-hybrid": "grub2-hybrid",
+    "hybrid": "grub2-hybrid",
+    "grub2-uefi": "grub2-uefi",
+    "uefi": "grub2-uefi",
+    "efi": "grub2-uefi",
+    "grub2-bios": "grub2-bios",
+    "bios": "grub2-bios",
+    "syslinux": "syslinux",
+    "isolinux": "syslinux"
+  }
+}

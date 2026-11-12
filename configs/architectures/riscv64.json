@@ -1,4 +1,25 @@
 {
   "arch": "riscv64",
-  "dpkg_arch": "riscv64"
+  "dpkg_arch": "riscv64",
+  "aliases": [],
+  "kernel_suffix": "riscv64",
+  "image": {
+    "efi_target": "riscv64-efi",
+    "efi_filename": "BOOTRISCV64.EFI",
+    "efi_suffix": "riscv64",
+    "bios": false,
+    "iso_packages": [
+      "grub-efi-riscv64-bin"
+    ],
+    "disk_grub_package": "grub-efi-riscv64-bin",
+    "excluded_package_prefixes": [
+      "grub-pc",
+      "grub-efi-amd64",
+      "grub-efi-ia32",
+      "isolinux",
+      "syslinux",
+      "shim-signed"
+    ],
+    "compatibility_efi_architectures": []
+  }
 }

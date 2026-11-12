@@ -1,0 +1,45 @@
+{
+  "architecture": "amd64",
+  "distro": "debian-13",
+  "kernel": "generic",
+  "filesystem": "ext4",
+  "format": "iso",
+  "mode": "mock",
+  "clean": true,
+  "di_mode": "live",
+  "filesystems": [
+    "ext4",
+    "btrfs",
+    "xfs",
+    "f2fs"
+  ],
+  "compressions": [
+    "zstd",
+    "xz",
+    "gzip",
+    "lz4"
+  ],
+  "formats": [
+    "iso",
+    "netboot",
+    "img",
+    "raw",
+    "qcow2",
+    "vmdk",
+    "vhd",
+    "vhdx",
+    "vdi",
+    "tarball",
+    "container",
+    "oci"
+  ],
+  "modes": [
+    "mock",
+    "real"
+  ],
+  "di_modes": [
+    "live",
+    "netinstall",
+    "netboot"
+  ]
+}

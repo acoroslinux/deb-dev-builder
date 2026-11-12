@@ -1,4 +1,11 @@
 {
   "init_system": "runit",
-  "packages": ["runit", "runit-init", "elogind"]
+  "packages": [
+    "runit",
+    "runit-init",
+    "elogind",
+    "libpam-elogind"
+  ],
+  "live_config_package": "live-config-sysvinit",
+  "zram_package": "zram-tools"
 }

@@ -1,3 +1,7 @@
 {
-  "kernel": "rt"
+  "kernel": "rt",
+  "package_templates": [
+    "linux-image-rt-{suffix}",
+    "linux-headers-rt-{suffix}"
+  ]
 }

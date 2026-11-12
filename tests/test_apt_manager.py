@@ -3,6 +3,48 @@ from pathlib import Path
 import subprocess
 from deb_dev_builder.core.chroot_manager import ChrootManager
 from deb_dev_builder.core.apt_manager import APTManager
+from deb_dev_builder.core.apt_manager import APTManagerError
+
+
+@pytest.mark.parametrize("missing_archive", [False, True])
+def test_offline_grub_sets_resolve_dependencies_even_when_installed(tmp_path, monkeypatch, missing_archive):
+    root = tmp_path / "chroot"
+    status = root / "var/lib/dpkg/status"
+    status.parent.mkdir(parents=True)
+    original = "Package: grub-efi-amd64\nStatus: install ok installed\n"
+    status.write_text(original)
+    chroot = ChrootManager(root, mode="real")
+    manager = APTManager(chroot, {"system": {"apt_cache": str(tmp_path / "cache")}})
+    calls = []
+    def run(command, **kwargs):
+        calls.append(command)
+        assert "--download-only" in command
+        guest_status = next(value.split("=", 1)[1] for value in command if value.startswith("Dir::State::status="))
+        assert (root / guest_status.lstrip("/")).read_text() == ""
+        selected = command[command.index("install") + 1:]
+        assert len(selected) == 1  # Conflicting BIOS/EFI metapackages stay separate.
+        filenames = [selected[0] + "_1_amd64.deb", "dependency_1_all.deb"]
+        if "--print-uris" in command:
+            output = "\n".join(f"'https://example.test/{filename}' {filename} 7 SHA256:unused" for filename in filenames)
+            return subprocess.CompletedProcess(command, 0, stdout=output)
+        archives = next(value.split("=", 1)[1] for value in command if value.startswith("Dir::Cache::archives="))
+        for filename in filenames:
+            if not missing_archive:
+                (root / archives.lstrip("/") / filename).write_bytes(b"archive")
+        return subprocess.CompletedProcess(command, 0)
+    monkeypatch.setattr(chroot, "run_in_chroot", run)
+    monkeypatch.setattr(manager, "create_repository_metadata", lambda directory: (directory / "Packages").write_text("indexed"))
+    destination = tmp_path / "repo"
+    if missing_archive:
+        with pytest.raises(APTManagerError, match="archive missing"):
+            manager.download_offline_package_sets([["grub-efi-amd64"], ["grub-pc"]], destination)
+        assert not (destination / "Packages").exists()
+    else:
+        manager.download_offline_package_sets([["grub-efi-amd64"], ["grub-pc"]], destination)
+        assert {path.name for path in destination.glob("*.deb")} == {"grub-efi-amd64_1_amd64.deb", "grub-pc_1_amd64.deb", "dependency_1_all.deb"}
+        assert len(calls) == 4
+    assert status.read_text() == original
+    assert not list((root / "tmp").glob("deb-dev-offline-*"))
 
 
 class IsolatedToolchain:

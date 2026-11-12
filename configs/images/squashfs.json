@@ -1,0 +1,26 @@
+{
+  "compression": "zstd",
+  "block_size": "1M",
+  "fallback_cpus": 4,
+  "processors": 0,
+  "compression_level": null,
+  "sort_file": null,
+  "exclude": [
+    "proc/*",
+    "sys/*",
+    "dev/*",
+    "tmp/*",
+    "run/*",
+    "var/cache/apt/*"
+  ],
+  "directories": [
+    "proc",
+    "sys",
+    "dev",
+    "tmp",
+    "run",
+    "mnt",
+    "media",
+    "var/cache/apt"
+  ]
+}

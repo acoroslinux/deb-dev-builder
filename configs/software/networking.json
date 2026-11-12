@@ -1,3 +1,10 @@
 {
-  "packages": ["network-manager", "network-manager-gnome", "iproute2", "curl", "wget"]
+  "packages": [
+    "network-manager",
+    "network-manager-gnome",
+    "iproute2",
+    "curl",
+    "wget",
+    "wpasupplicant"
+  ]
 }

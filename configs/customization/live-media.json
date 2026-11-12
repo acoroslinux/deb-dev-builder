@@ -1,0 +1,83 @@
+{
+  "enabled": true,
+  "native_script": "usr/bin/live-medium-eject",
+  "helper": "usr/lib/deb-dev-builder/live-media-prompt",
+  "marker": "# deb-dev-live-media-prompt",
+  "eject_anchor": "if [ -x \"$(which eject 2> /dev/null)\" ]",
+  "prompt_block": "\t\tif [ -x /bin/plymouth ] && plymouth --ping\n\t\tthen\n\t\t\tplymouth message --text=\"Please remove the live-medium, close the tray (if any) and press ENTER to continue:\"\n\t\t\tplymouth watch-keystroke > /dev/null",
+  "client": [
+    "plymouth"
+  ],
+  "start_command": [
+    "plymouthd",
+    "--mode=shutdown",
+    "--tty=/dev/tty1",
+    "--graphical-boot"
+  ],
+  "confirm_keys": "\r\n",
+  "disabled_options": [
+    "nosplash",
+    "plymouth.enable=0"
+  ],
+  "cmdline": "/proc/cmdline",
+  "reactivate_command": [
+    "plymouth",
+    "reactivate"
+  ],
+  "active_vt_command": [
+    "plymouth",
+    "--has-active-vt"
+  ],
+  "switch_vt_command": [
+    "chvt",
+    "1"
+  ],
+  "timeout_command": [
+    "timeout",
+    "10"
+  ],
+  "release_renderer_command": [
+    "start-stop-daemon",
+    "--stop",
+    "--oknodo",
+    "--signal",
+    "KILL",
+    "--retry",
+    "KILL/2",
+    "--exec",
+    "/usr/libexec/plymouth/plymouthd-fd-escrow"
+  ],
+  "shutdown_kernel_options": [],
+  "presentation": "retained",
+  "state_file": "/run/deb-dev-live-media-notice",
+  "stage_environment": "DEB_DEV_LIVE_MEDIA_STAGE",
+  "keyboard_command": [
+    "kbd_mode",
+    "--ascii",
+    "--force"
+  ],
+  "service_path": "etc/systemd/system/deb-dev-live-media-notice.service",
+  "service_targets": [
+    "poweroff.target",
+    "reboot.target",
+    "halt.target"
+  ],
+  "service_content": "[Unit]\nDescription=Prepare the live medium removal notice before final shutdown\nDefaultDependencies=no\nAfter=plymouth-poweroff.service plymouth-reboot.service plymouth-halt.service\nBefore=final.target systemd-poweroff.service systemd-reboot.service systemd-halt.service\nConditionPathExists=/run/live/medium\n\n[Service]\nType=oneshot\nEnvironment=DEB_DEV_LIVE_MEDIA_STAGE=snapshot\nExecStart=/usr/bin/live-medium-eject\nTimeoutStartSec=30\n",
+  "active_console_command": [
+    "fgconsole"
+  ],
+  "retained_switch_command": [
+    "chvt",
+    "{vt}"
+  ],
+  "terminal_path": "/dev/tty{vt}",
+  "terminal_settings_command": [
+    "stty",
+    "icanon",
+    "echo",
+    "icrnl",
+    "opost",
+    "onlcr",
+    "isig"
+  ]
+}

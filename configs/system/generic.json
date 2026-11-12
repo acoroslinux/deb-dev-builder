@@ -1,3 +1,7 @@
 {
-  "kernel": "generic"
+  "kernel": "generic",
+  "package_templates": [
+    "linux-image-{suffix}",
+    "linux-headers-{suffix}"
+  ]
 }

@@ -1,0 +1,33 @@
+{
+  "desktop": "qtile",
+  "display_manager": "lightdm",
+  "session_type": "x11",
+  "packages": [
+    "qtile",
+    "lightdm",
+    "lightdm-gtk-greeter",
+    "xterm",
+    "rxvt-unicode",
+    "suckless-tools",
+    "thunar",
+    "dex",
+    "dunst",
+    "mate-polkit",
+    "xss-lock",
+    "i3lock",
+    "gnome-keyring",
+    "libpam-gnome-keyring",
+    "menu",
+    "menu-xdg",
+    "python3-psutil"
+  ],
+  "supported_suites": [
+    "trixie",
+    "forky",
+    "sid",
+    "excalibur",
+    "freia",
+    "ceres",
+    "testing"
+  ]
+}

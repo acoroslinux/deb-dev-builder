@@ -1,0 +1,7 @@
+{
+  "live_user": {
+    "name": "liveuser",
+    "password": "liveuser",
+    "groups": ["sudo", "audio", "video", "plugdev", "netdev"]
+  }
+}

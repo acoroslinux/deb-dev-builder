@@ -1,0 +1,11 @@
+{
+  "source": "artwork/wallpapers/deb-dev-modern.jpg",
+  "directory": "usr/share/backgrounds",
+  "filename": "deb-dev-modern.jpg",
+  "default_link": "default-wallpaper.png",
+  "xfce_default_backdrop": {
+    "distributions": ["devuan-ceres"],
+    "path": "usr/share/images/desktop-base/default",
+    "image": "usr/share/images/desktop-base/desktop-background"
+  }
+}
